@@ -24,9 +24,13 @@ import numpy as np
 from MDAnalysisTests.datafiles import BPSH_XTC, BPSH_TPR
 
 class TestMSD(object):
-    def __init__(self):
+    def setUp(self):
         self.u = MDAnalysis.Universe(BPSH_TPR,BPSH_XTC)
         self.this_MSD = MSD(self.u,['name CL'],0,25,5,write_output=False)
+
+    def tearDown(self):
+        del self.u
+        del self.this_MSD
 
     def test_MSD(self):
         answr = [np.array([[  0.        ,   3.47127771,   6.42875481,   9.29823494,

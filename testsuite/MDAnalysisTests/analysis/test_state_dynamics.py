@@ -25,9 +25,14 @@ import numpy as np
 from MDAnalysisTests.datafiles import BPSH_XTC, BPSH_TPR, SD_DATA
 
 class TestBinaryPair(object):
-    def __init__(self):
+    def setUp(self):
         self.u = MDAnalysis.Universe(BPSH_TPR,BPSH_XTC)
         self.this_BP = BinaryPair(self.u,['name CL'],0,25,5,write_output=False)
+
+    def tearDown(self):
+        del self.u
+        del self.this_BP
+
     def test_binary_pair(self):
         answer = pickle.load(open(SD_DATA,'rb'))
         assert_allclose(self.this_BP.run(),answer,10**-4,10**-4)
