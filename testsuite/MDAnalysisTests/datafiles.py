@@ -287,6 +287,10 @@ contacts_villin_folded = resource_filename(__name__, "data/contacts/villin_folde
 contacts_villin_unfolded = resource_filename(__name__, "data/contacts/villin_unfolded.gro.bz2")
 contacts_file = resource_filename(__name__, "data/contacts/2F4K_qlist5_remap.dat")
 
+BPSH_XTC = resource_filename(__name__,"data/BPSH_50ps.xtc")
+BPSH_TPR = resource_filename(__name__,"data/BPSH_50ps.tpr")
+SD_DATA = resource_filename(__name__,"data/state_dynamics.p")
+
 trz4data = resource_filename(__name__, "data/lammps/datatest.trz")
 LAMMPSdata = resource_filename(__name__, "data/lammps/datatest.data")
 LAMMPSdata_mini = resource_filename(__name__, "data/lammps/mini.data")

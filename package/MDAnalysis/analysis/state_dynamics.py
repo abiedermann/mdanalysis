@@ -44,6 +44,8 @@ class BinaryPair(object):
         last frame to analyze
       out_name : str
         name of output pickle file
+      write_output : bool
+        Specifies whether to write pickle file
 
     Returns:
     --------
@@ -77,7 +79,7 @@ class BinaryPair(object):
         return pair, end_pair, dominated, aborted
 
     def __init__(self, universe, selection, reference, cut1, cut2, max_order,
-                 t0, tf, out_name='state_dynamics'):
+                 t0, tf, out_name='state_dynamics',write_output=True):
         self.universe = universe
         self.selection = selection
         self.reference = reference
@@ -87,6 +89,7 @@ class BinaryPair(object):
         self.t0 = int(t0)
         self.tf = int(tf)
         self.out_name = out_name
+        self.write_output = bool(write_output)
 
         """
         Internal variable definitions:
@@ -483,9 +486,13 @@ class BinaryPair(object):
             if this_frame % 500 == 0:
                 print('Frame: ' + str(this_frame))
 
-        pickle.dump([self.pair, self.end_pair, self.dominated,
+        if self.write_output:
+            pickle.dump([self.pair, self.end_pair, self.dominated,
                      self.handoff_counter, self.hop_counter],
                     open(self.out_name, 'wb'))
+        else:
+            return [self.pair, self.end_pair, self.dominated,
+                    self.handoff_counter, self.hop_counter]
 
         print("Complete!")
 
@@ -503,13 +510,14 @@ if __name__ == "__main__":
     -b t0 (frames)
     -e tf (frames)
     -o output file name (optional)
+    --out write_output boolean (default=True)
     """
     os.system('')
 
     # handling input arguments
-    this_opts, args = getopt.getopt(  # sys.argv[1:]
-        data.split().split('='), "f:s:b:e:o:",
-        ['cut1=', 'cut2=', 'max_order=', 'ref=', 'sel='])
+    this_opts, args = getopt.getopt(
+        sys.argv[1:], "f:s:b:e:o:",
+        ['cut1=', 'cut2=', 'max_order=', 'ref=', 'sel=', 'out='])
 
     opts = dict()
     for opt, arg in this_opts:
@@ -518,6 +526,11 @@ if __name__ == "__main__":
     # handling optional parameters
     if "-o" not in opts:
         opts["-o"] = "state_dynamics.p"
+    if "--out" in opts:
+        if 'False' in opts['--out'] or 'false' in opts['--out']:
+            opts['--out']=False
+    if "--out" not in opts:
+        opts["--out"] = True
 
     '''
     # For testing purposes
@@ -531,7 +544,8 @@ if __name__ == "__main__":
         '-e' : 1000,
         '-o' : 'test.p',
         '--cut1' : 0.3,
-        '--cut2' : 0.4
+        '--cut2' : 0.4,
+        '--out' : True
     }
     '''
 
@@ -539,5 +553,5 @@ if __name__ == "__main__":
 
     this_BinaryPair = BinaryPair(
         u, opts['--sel'], opts['--ref'], opts['--cut1'], opts['--cut2'],
-        opts['--max_order'], opts['-b'], opts['-e'], opts['-o'])
+        opts['--max_order'], opts['-b'], opts['-e'], opts['-o'], opts['--out'])
     this_BinaryPair.run()

@@ -38,20 +38,22 @@ class MSD(object):
     Parameters
     ----------
     universe : object
-         Universe object containing trajectory data
+        Universe object containing trajectory data
     select_list : list
-         List of selection strings
+        List of selection strings
     t0 : int
-         Time when analysis begins (in frames)
+        Time when analysis begins (in frames)
     tf : int
-         Time when analysis ends (in frames)
+        Time when analysis ends (in frames)
     dt_restart : int
-         Spacing of restarts (in frames)
+        Spacing of restarts (in frames)
     out_name: str
-         Name of pickle output file: (out_name).p
+        Name of pickle output file: (out_name).p
     len_msd : int
-         Specifies the maximum tau to be calculated (frames)
-         (saves memory in array allocation)
+        Specifies the maximum tau to be calculated (frames)
+        (saves memory in array allocation)
+    write_output : bool
+        Specifies whether to write pickle file
 
     Returns
     -------
@@ -62,9 +64,11 @@ class MSD(object):
     """
 
     def __init__(self, universe, select_list, t0, tf, dt_restart,
-                 out_name='msd', len_msd=250):
+                 out_name='msd', len_msd=250, write_output=True):
         self.universe = universe
-        self.select_list = select_list.split(',')
+        self.select_list = select_list
+        if type select_list == str():
+            self.select_list = select_list.split(',')
         self.t0 = int(t0)
         self.tf = int(tf)
         self.dt_restart = int(dt_restart)
@@ -74,6 +78,7 @@ class MSD(object):
         if len_msd > n_frames:
             len_msd = n_frames
         self.len_msd = len_msd
+        self.write_output = write_output
 
     def _select(self):
         """Generates list of atom groups that satisfy select_list
@@ -263,7 +268,11 @@ class MSD(object):
 
         msd, n_samples = self._process_pos_data(pos, set_list, dict_list, dim)
 
-        pickle.dump([msd, n_samples], open(self.out_name, 'wb'))
+        if self.write_output:
+            pickle.dump([msd, n_samples], open(self.out_name, 'wb'))
+        # for testing purposes
+        else:
+            return [msd, n_samples]
 
 
 '''
@@ -294,11 +303,12 @@ if __name__ == "__main__":
     --dt number of frames between restarts
     -o output file name (optional)
     --len maximum number of tau frames to calculate (optional)
+    --out write output boolean (optional, default=True)
     """
     os.system('')
     # handling input arguments
     this_opts, args = getopt.getopt(sys.argv[1:], "f:s:b:e:o:",
-                               ['dt=', 'sel=', 'len='])
+                               ['dt=', 'sel=', 'len=', 'out='])
     opts = dict()
     for opt, arg in this_opts:
         opts[opt] = arg
@@ -308,11 +318,17 @@ if __name__ == "__main__":
         opts["-o"] = "msd.p"
     if "--len" not in opts:
         opts["--len"] = 250
+    if "--out" in opts:
+        if 'False' in opts['--out'] or 'false' in opts['--out']:
+            opts['--out'] = False
+    if "--out" not in opts:
+        opts['--out'] = True
 
     u = MDAnalysis.Universe(opts['-s'], opts['-f'])
 
     # run calculation
     # safe_outdir(outdir)
     this_MSD = MSD(u, opts['--sel'], opts['-b'], opts['-e'], opts['--dt'],
-                   out_name=opts['-o'], len_msd=opts['--len'])  # *args)
+                   out_name=opts['-o'], len_msd=opts['--len'],
+                   write_output=opts['--out')
     this_MSD.run()
