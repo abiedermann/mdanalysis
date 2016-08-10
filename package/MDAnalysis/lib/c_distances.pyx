@@ -33,8 +33,11 @@ cdef extern from "calc_distances.h":
     ctypedef float coordinate[3]
     cdef bint USED_OPENMP
     void _calc_distance_array(coordinate* ref, int numref, coordinate* conf, int numconf, double* distances)
+    void _calc_distance_vector(coordinate* ref, int numref, coordinate* conf, double* distances)
     void _calc_distance_array_ortho(coordinate* ref, int numref, coordinate* conf, int numconf, float* box, double* distances)
+    void _calc_distance_vector_ortho(coordinate* ref, int numref, coordinate* conf, float* box, double* distances)
     void _calc_distance_array_triclinic(coordinate* ref, int numref, coordinate* conf, int numconf, coordinate* box, double* distances)
+    void _calc_distance_vector_triclinic(coordinate* ref, int numref, coordinate* conf, int numconf, coordinate* box, double* distances)
     void _calc_self_distance_array(coordinate* ref, int numref, double* distances, int distnum)
     void _calc_self_distance_array_ortho(coordinate* ref, int numref, float* box, double* distances, int distnum)
     void _calc_self_distance_array_triclinic(coordinate* ref, int numref, coordinate* box, double* distances, int distnum)
@@ -64,6 +67,15 @@ def calc_distance_array(numpy.ndarray ref, numpy.ndarray conf,
                          <coordinate*>conf.data, confnum,
                          <double*>result.data)
 
+def calc_distance_vector(numpy.ndarray ref, numpy.ndarray conf,
+                        numpy.ndarray result):
+    cdef int refnum
+    refnum = ref.shape[0]
+
+    _calc_distance_vector(<coordinate*>ref.data, refnum,
+                         <coordinate*>conf.data,
+                         <double*>result.data)
+
 def calc_distance_array_ortho(numpy.ndarray ref, numpy.ndarray conf,
                               numpy.ndarray box,
                               numpy.ndarray result):
@@ -76,6 +88,17 @@ def calc_distance_array_ortho(numpy.ndarray ref, numpy.ndarray conf,
                                <float*>box.data,
                                <double*>result.data)
 
+def calc_distance_vector_ortho(numpy.ndarray ref, numpy.ndarray conf,
+                              numpy.ndarray box,
+                              numpy.ndarray result):
+    cdef int refnum
+    refnum = ref.shape[0]
+
+    _calc_distance_vector_ortho(<coordinate*>ref.data, refnum,
+                               <coordinate*>conf.data,
+                               <float*>box.data,
+                               <double*>result.data)
+
 def calc_distance_array_triclinic(numpy.ndarray ref, numpy.ndarray conf,
                                   numpy.ndarray box,
                                   numpy.ndarray result):
@@ -84,6 +107,18 @@ def calc_distance_array_triclinic(numpy.ndarray ref, numpy.ndarray conf,
     refnum = ref.shape[0]
 
     _calc_distance_array_triclinic(<coordinate*>ref.data, refnum,
+                                   <coordinate*>conf.data, confnum,
+                                   <coordinate*>box.data,
+                                   <double*>result.data)
+
+def calc_distance_vector_triclinic(numpy.ndarray ref, numpy.ndarray conf,
+                                  numpy.ndarray box,
+                                  numpy.ndarray result):
+    cdef int confnum, refnum
+    confnum = conf.shape[0]
+    refnum = ref.shape[0]
+
+    _calc_distance_vector_triclinic(<coordinate*>ref.data, refnum,
                                    <coordinate*>conf.data, confnum,
                                    <coordinate*>box.data,
                                    <double*>result.data)
@@ -307,3 +342,33 @@ def contact_matrix_pbc(coord, sparse_contacts, box, cutoff):
             if dist < cutoff2:
                 sparse_contacts[i, j] = True
                 sparse_contacts[j, i] = True
+
+@cython.boundscheck(False)
+def binary_contact_matrix_pbc(ref_coord,sel_coord, sparse_contacts1,
+                              sparse_contacts2, box, double cutoff1, double cutoff2):
+    cdef int rows = len(ref_coord)
+    cdef int cols = len(sel_coord)
+    cutoff1 = cutoff1 ** 2
+    cutoff2 = cutoff2 ** 2
+    cdef float[:, ::1] ref_coord_view = ref_coord
+    cdef float[:, ::1] sel_coord_view = sel_coord
+    cdef float[::1] box_view = box
+    cdef float[::1] box_inv = 1. / box
+
+    cdef int i, j
+    cdef double[3] rr
+    cdef double dist
+    for i in range(rows):
+        for j in range(cols):
+            rr[0] = ref_coord_view[i, 0] - sel_coord_view[j, 0]
+            rr[1] = ref_coord_view[i, 1] - sel_coord_view[j, 1]
+            rr[2] = ref_coord_view[i, 2] - sel_coord_view[j, 2]
+
+            minimum_image(rr, &box_view[0], &box_inv[0])
+
+            dist = rr[0]*rr[0] + rr[1]*rr[1] + rr[2]*rr[2]
+
+            if dist < cutoff1:
+                sparse_contacts1[i, j] = True
+            elif dist >= cutoff1 and dist < cutoff2:
+                sparse_contacts2[i, j] = True

@@ -144,6 +144,26 @@ static void _calc_distance_array(coordinate* ref, int numref, coordinate* conf,
   }
 }
 
+static void _calc_distance_vector(coordinate* ref, int numref, coordinate* conf,
+                                  double* distances)
+{
+  int i;
+  double dx[3];
+  double rsq;
+
+#ifdef PARALLEL
+#pragma omp parallel for private(i, dx, rsq) shared(distances)
+#endif
+  for (i=0; i<numref; i++) {
+    dx[0] = conf[i][0] - ref[i][0];
+    dx[1] = conf[i][1] - ref[i][1];
+    dx[2] = conf[i][2] - ref[i][2];
+    rsq = (dx[0]*dx[0]) + (dx[1]*dx[1]) + (dx[2]*dx[2]);
+    *(distances+i) = sqrt(rsq);
+  }
+}
+
+// original function
 static void _calc_distance_array_ortho(coordinate* ref, int numref, coordinate* conf,
                                        int numconf, float* box, double* distances)
 {
@@ -170,6 +190,33 @@ static void _calc_distance_array_ortho(coordinate* ref, int numref, coordinate* 
     }
   }
 }
+
+static void _calc_distance_vector_ortho(coordinate* ref, int numref, coordinate* conf,
+                                        float* box, double* distances)
+{
+  int i;
+  double dx[3];
+  float inverse_box[3];
+  double rsq;
+
+  inverse_box[0] = 1.0 / box[0];
+  inverse_box[1] = 1.0 / box[1];
+  inverse_box[2] = 1.0 / box[2];
+#ifdef PARALLEL
+#pragma omp parallel for private(i, dx, rsq) shared(distances)
+#endif
+  //numref and numconf must be equal
+  for (i=0; i<numref; i++) {
+    dx[0] = conf[i][0] - ref[i][0];
+    dx[1] = conf[i][1] - ref[i][1];
+    dx[2] = conf[i][2] - ref[i][2];
+    // Periodic boundaries
+    minimum_image(dx, box, inverse_box);
+    rsq = (dx[0]*dx[0]) + (dx[1]*dx[1]) + (dx[2]*dx[2]);
+    *(distances+i) = sqrt(rsq);
+  }
+}
+//*numconf+i
 
 static void _calc_distance_array_triclinic(coordinate* ref, int numref,
                                            coordinate* conf, int numconf,
@@ -203,6 +250,39 @@ static void _calc_distance_array_triclinic(coordinate* ref, int numref,
       rsq = (dx[0]*dx[0] + dx[1]*dx[1] + dx[2]*dx[2]);
       *(distances + i*numconf + j) = sqrt(rsq);
     }
+  }
+}
+
+static void _calc_distance_vector_triclinic(coordinate* ref, int numref,
+                                           coordinate* conf, int numconf,
+                                           coordinate* box, double* distances)
+{
+  int i;
+  double dx[3];
+  float box_half[3], box_inverse[3];
+  double rsq;
+  
+  box_half[0] = 0.5 * box[0][0];
+  box_half[1] = 0.5 * box[1][1];
+  box_half[2] = 0.5 * box[2][2];
+
+  box_inverse[0] = 1.0 / box[0][0];
+  box_inverse[1] = 1.0 / box[1][1];
+  box_inverse[2] = 1.0 / box[2][2];
+  // Move coords to inside box
+  _triclinic_pbc(ref, numref, box, box_inverse);
+  _triclinic_pbc(conf, numconf, box, box_inverse);
+
+#ifdef PARALLEL
+#pragma omp parallel for private(i, dx, rsq) shared(distances)
+#endif
+  for (i=0; i<numref; i++){
+    dx[0] = conf[i][0] - ref[i][0];
+    dx[1] = conf[i][1] - ref[i][1];
+    dx[2] = conf[i][2] - ref[i][2];
+    minimum_image_triclinic(dx, box, box_half);
+    rsq = (dx[0]*dx[0] + dx[1]*dx[1] + dx[2]*dx[2]);
+    *(distances + i) = sqrt(rsq);
   }
 }
 
