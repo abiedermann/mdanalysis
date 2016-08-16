@@ -116,7 +116,10 @@ __all__ = [
     "COORDINATES_TOPOLOGY",
     "NUCLsel",
     "GRO_empty_atom", "GRO_missing_atomname", # for testing GROParser exception raise
-    "ENT" #for testing ENT file extension
+    "ENT", #for testing ENT file extension
+    "BPSH_XTC",  # for testing MSD and state_dynamics
+    "BPSH_TPR",
+    "SD_DATA"
 ]
 
 from pkg_resources import resource_filename

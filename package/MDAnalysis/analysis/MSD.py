@@ -75,7 +75,7 @@ class MSD(object):
                  out_name='msd', len_msd=250, write_output=True):
         self.universe = universe
         self.select_list = select_list
-        if type select_list == str():
+        if type(select_list) == str():
             self.select_list = select_list.split(',')
         self.t0 = int(t0)
         self.tf = int(tf)
@@ -338,5 +338,5 @@ if __name__ == "__main__":
     # safe_outdir(outdir)
     this_MSD = MSD(u, opts['--sel'], opts['-b'], opts['-e'], opts['--dt'],
                    out_name=opts['-o'], len_msd=opts['--len'],
-                   write_output=opts['--out')
+                   write_output=opts['--out'])
     this_MSD.run()

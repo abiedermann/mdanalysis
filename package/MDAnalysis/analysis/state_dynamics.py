@@ -502,11 +502,11 @@ class BinaryPair(object):
 
         if self.write_output:
             pickle.dump([self.pair, self.end_pair, self.dominated,
-                     self.handoff_counter, self.hop_counter],
+                         self.aborted, self.handoff_counter, self.hop_counter],
                     open(self.out_name, 'wb'))
         else:
             return [self.pair, self.end_pair, self.dominated,
-                    self.handoff_counter, self.hop_counter]
+                    self.aborted, self.handoff_counter, self.hop_counter]
 
         print("Complete!")
 

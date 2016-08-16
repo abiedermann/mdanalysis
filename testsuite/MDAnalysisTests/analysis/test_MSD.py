@@ -16,9 +16,9 @@
 from __future__ import absolute_import, print_function
 
 import MDAnalysis
-from MDAnalysis.analysis import MSD
+from MDAnalysis.analysis.MSD import MSD
 
-from numpy.testing import assert_allclose
+from numpy.testing import assert_almost_equal, assert_allclose
 import numpy as np
 
 from MDAnalysisTests.datafiles import BPSH_XTC, BPSH_TPR
@@ -33,14 +33,14 @@ class TestMSD(object):
         del self.this_MSD
 
     def test_MSD(self):
-        answr = [np.array([[  0.        ,   3.47127771,   6.42875481,   9.29823494,
+        answer = [np.array([[  0.        ,   3.47127771,   6.42875481,   9.29823494,
                              11.99853706,  15.02497864,  19.54847527,  22.4382    ,
                              25.13007355,  27.46950531,  30.27593613,  36.07775116,
                              38.90217209,  42.03682327,  45.21638489,  48.07343674,
                              55.66702652,  57.79199982,  60.18118286,  62.08581161,
                              63.77077866,  71.2060318 ,  73.94713593,  77.23184204,
-                             78.38237762,  79.60108185]], dtype=float32),
+                             78.38237762,  79.60108185]], dtype='float32'),
                  np.array([[6, 5, 5, 5, 5, 5, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3,
                      2, 2, 2, 2, 2, 1, 1, 1, 1, 1]])]
-        assert_allclose(self.this_MSD.run(),answr, 10**-4, 10**-4)
-
+        msd_out = self.this_MSD.run()
+	    assert_allclose(answer,msd_out,10**-4,10**-4)

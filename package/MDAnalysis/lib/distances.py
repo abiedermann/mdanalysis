@@ -111,6 +111,7 @@ from .c_distances import (calc_distance_array,
                           ortho_pbc,
                           triclinic_pbc)
 
+from c_distances_openmp import OPENMP_ENABLED as USED_OPENMP
 
 def _box_check(box):
     """Take a box input and deduce what type of system it represents based
