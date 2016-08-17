@@ -75,7 +75,7 @@ class MSD(object):
                  out_name='msd', len_msd=250, write_output=True):
         self.universe = universe
         self.select_list = select_list
-        if type(select_list) == str():
+        if type(select_list) is str:
             self.select_list = select_list.split(',')
         self.t0 = int(t0)
         self.tf = int(tf)
