@@ -77,6 +77,7 @@ class MSD(object):
         self.select_list = select_list
         if type(select_list) is str:
             self.select_list = select_list.split(',')
+        print(self.select_list)
         self.t0 = int(t0)
         self.tf = int(tf)
         self.dt_restart = int(dt_restart)
@@ -247,11 +248,12 @@ class MSD(object):
                     # updating restart set to exclude any atoms which have
                     # left the selection since the restart point
                     atoms_in_sel = atoms_in_sel.intersection(set_list[i][ts-j])
-                    # find mutual atoms
+                    # find mutual atoms at times 0 and ts-j
+                    shared0 = [dict_list[i][0][k] for k in atoms_in_sel]
                     shared = [dict_list[i][ts-j][k] for k in atoms_in_sel]
                     # calculate distances bases on mutual atoms
                     msd[i][ts-j] = (msd[i][ts-j]*n_samples[i][ts-j] + np.power(
-                                    distance_vector(pos[i][0][shared],
+                                    distance_vector(pos[i][0][shared0],
                                                     pos[i][ts-j][shared],
                                                     dim[ts-j]), 2).mean(axis=0)
                                     ) / (n_samples[i][ts-j]+1)
