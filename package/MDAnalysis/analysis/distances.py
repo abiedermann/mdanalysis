@@ -112,16 +112,9 @@ def contact_matrix(coord, cutoff=15.0, returntype="numpy", box=None):
             contact_matrix_no_pbc(coord, sparse_contacts, cutoff)
         return sparse_contacts
 
-def binary_contact_matrix(ref_coord, sel_coord, cutoff1=3.0, cutoff2=5.0, 
-                          returntype="sparse", box=None):
-    '''Calculates a matrix of contacts.
-
-    There is a fast, high-memory-usage version for small systems
-    (*returntype* = 'numpy'), and a slower, low-memory-usage version for
-    larger systems (*returntype* = 'sparse').
-
-    If *box* dimensions are passed then periodic boundary conditions
-    are applied.
+def binary_contact_matrix(ref_coord, sel_coord, cutoff1=3.0, cutoff2=5.0, box):
+    '''Calculates 2 matrices of contacts corresponding state dynamics
+       definitions.
 
     Parameters
     ---------
@@ -131,11 +124,7 @@ def binary_contact_matrix(ref_coord, sel_coord, cutoff1=3.0, cutoff2=5.0,
        Array of coordinates of shape ``(N, 3)`` and dtype float32.
     cutoff : float, optional, default 15
        Particles within `cutoff` are considered to form a contact.
-    returntype : string, optional, default "numpy"
-       Select how the contact matrix is returned.
-       * ``"numpy"``: return as an ``(N. N)`` :class:`numpy.ndarray`
-       * ``"sparse"``: return as a :class:`scipy.sparse.lil_matrix`
-    box : array-like or ``None``, optional, default ``None``
+    box : array-like
        Simulation cell dimensions in the form of
        :attr:`MDAnalysis.trajectory.base.Timestep.dimensions` when
        periodic boundary conditions should be taken into account for
@@ -143,10 +132,9 @@ def binary_contact_matrix(ref_coord, sel_coord, cutoff1=3.0, cutoff2=5.0,
 
     Returns
     -------
-    array or sparse matrix
-       The contact matrix is returned in a format determined by the `returntype`
-       keyword.
-
+    2 sparse matrices (in non_zero form)
+       The contact matrices are returned in the tuple (sparse_contacts1,sparse_contacts2)
+       corresponding to cuoff1 and cutoff2, respectively.
 
     Note
     ----
@@ -157,28 +145,23 @@ def binary_contact_matrix(ref_coord, sel_coord, cutoff1=3.0, cutoff2=5.0,
        Keyword *suppress_progmet* and *progress_meter_freq* were removed.
 
     '''
-    # not implemented !!!!!!!!!!!!!
-    if returntype == "numpy":
-        adj = (distance_array(ref_coord, sel_coord, box=box) < cutoff)
-        return adj
-    elif returntype == "sparse":
-        if sparse is None:
-            # hack: if we are running with minimal dependencies then scipy was
-            #       not imported and we have to bail here (see scipy import at top)
-            raise ImportError("For sparse matrix functionality you need to "
-                              "import scipy.")
-        # Initialize square List of Lists matrix of dimensions equal to number
-        # of coordinates passed
-        sparse_contacts1 = sparse.lil_matrix((len(ref_coord), len(sel_coord)), dtype='bool')
-        sparse_contacts2 = sparse.lil_matrix((len(ref_coord), len(sel_coord)), dtype='bool')
-        if box is not None:
-            # with PBC
-            binary_contact_matrix_pbc(ref_coord, sel_coord, sparse_contacts1,
-                    sparse_contacts2, box, cutoff1, cutoff2)
-        #else:
-            # without PBC
-        #    contact_matrix_no_pbc(coord, sparse_contacts, cutoff)
-        return sparse_contacts1.nonzero(), sparse_contacts2.nonzero()
+    if sparse is None:
+	# hack: if we are running with minimal dependencies then scipy was
+	#       not imported and we have to bail here (see scipy import at top)
+	raise ImportError("For sparse matrix functionality you need to "
+			  "import scipy.")
+    # Initialize square List of Lists matrix of dimensions equal to number
+    # of coordinates passed
+    sparse_contacts1 = sparse.lil_matrix((len(ref_coord), len(sel_coord)), dtype='bool')
+    sparse_contacts2 = sparse.lil_matrix((len(ref_coord), len(sel_coord)), dtype='bool')
+    if box is not None:
+	# with PBC
+	binary_contact_matrix_pbc(ref_coord, sel_coord, sparse_contacts1,
+		sparse_contacts2, box, cutoff1, cutoff2)
+    #else:
+	# without PBC
+    #    contact_matrix_no_pbc(coord, sparse_contacts, cutoff)
+    return sparse_contacts1.nonzero(), sparse_contacts2.nonzero()
 
 def dist(A, B, offset=0):
     """Return distance between atoms in two atom groups.

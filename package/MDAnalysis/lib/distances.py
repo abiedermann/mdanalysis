@@ -46,6 +46,7 @@ Functions
 ---------
 
 .. autofunction:: distance_array(reference, configuration [, box [, result [, backend]]])
+.. autofunction:: distance_vector(reference, configuration [, box[, result [, backend]]])
 .. autofunction:: self_distance_array(reference [, box [,result [, backend]]])
 .. autofunction:: calc_bonds(atom1, atom2 [, box, [, result [, backend]]])
 .. autofunction:: calc_angles(atom1, atom2, atom3 [,box [, result [, backend]]])
@@ -276,11 +277,11 @@ def distance_array(reference, configuration, box=None, result=None, backend="ser
 
     return distances
 
-def distance_vector(reference, configuration, box=None, result=None, backend="serial"):
-    """Calculate all distances between a reference set and another configuration.
+def distance_vector(reference, configuration, box, backend="serial"):
+    """Calculate only the diagonals of the distance_array
 
     If there are *i* positions in reference, and *j* positions in configuration,
-    will calculate a *i* x *j* array of distances
+    will calculate a *i* x 1 vector of distances. This requires that i==j.
     If an *box* is supplied then a minimum image convention is used when
     calculating distances.
 
@@ -288,7 +289,7 @@ def distance_vector(reference, configuration, box=None, result=None, backend="se
     len(configuration))`` is provided in *result* then this preallocated array is
     filled. This can speed up calculations.
 
-    d = distance_array(reference, configuration[,box[,result=d]])
+    d = distance_vector(reference, configuration, box[,backend="serial"])
 
     :Arguments:
         *reference*
@@ -297,22 +298,16 @@ def distance_vector(reference, configuration, box=None, result=None, backend="se
              configuration coordinate array (must be numpy.float32)
         *box*
              cell dimensions (minimum image convention is applied)
-             or None [``None``].
              Cell dimensions must be in an identical to format to those returned
              by :attr:`MDAnalysis.coordinates.base.Timestep.dimensions`,
              [lx, ly, lz, alpha, beta, gamma]
-        *result*
-             optional preallocated result array which must have the
-             shape (len(ref), len(conf)) and dtype=numpy.float64.
-             Avoids creating the array which saves time when the function
-             is called repeatedly. [``None``]
         *backend*
              select the type of acceleration; "serial" is always available. Other
              possibilities are "OpenMP" (OpenMP).
     :Returns:
          *d*
-             (len(reference),len(configuration)) numpy array with the distances d[i,j]
-             between reference coordinates i and configuration coordinates j
+             (len(reference)) numpy array with the distances
+             between reference coordinates and corresponding configuration coordinates
 
     .. Note:: This method is slower than it could be because internally we need to
               make copies of the ref and conf arrays.
@@ -337,24 +332,13 @@ def distance_vector(reference, configuration, box=None, result=None, backend="se
     confnum = conf.shape[0]
     refnum = ref.shape[0]
 
-    if result is not None:
-        _check_results_array(result, (refnum, confnum))
-        distances = np.asarray(result)
+    if boxtype == 'ortho':
+        _run("calc_distance_vector_ortho",
+               args=(ref, conf, box, distances),
+               backend=backend)
     else:
-        distances = np.zeros(confnum, np.float64)
-
-    if box is not None:
-        if boxtype == 'ortho':
-            _run("calc_distance_vector_ortho",
-                   args=(ref, conf, box, distances),
-                   backend=backend)
-        else:
-            _run("calc_distance_vector_triclinic",
-                   args=(ref, conf, box, distances),
-                   backend=backend)
-    else:
-        _run("calc_vector_array",
-               args=(ref, conf, distances),
+        _run("calc_distance_vector_triclinic",
+               args=(ref, conf, box, distances),
                backend=backend)
 
     return distances

@@ -163,7 +163,6 @@ static void _calc_distance_vector(coordinate* ref, int numref, coordinate* conf,
   }
 }
 
-// original function
 static void _calc_distance_array_ortho(coordinate* ref, int numref, coordinate* conf,
                                        int numconf, float* box, double* distances)
 {
@@ -216,7 +215,6 @@ static void _calc_distance_vector_ortho(coordinate* ref, int numref, coordinate*
     *(distances+i) = sqrt(rsq);
   }
 }
-//*numconf+i
 
 static void _calc_distance_array_triclinic(coordinate* ref, int numref,
                                            coordinate* conf, int numconf,
