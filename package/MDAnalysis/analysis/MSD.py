@@ -19,6 +19,7 @@ from __future__ import absolute_import, print_function, division
 import sys
 import os
 import getopt
+import warnings
 from collections import deque
 
 import numpy as np
@@ -251,13 +252,26 @@ class MSD(object):
                     # find mutual atoms at times 0 and ts-j
                     shared0 = [dict_list[i][0][k] for k in atoms_in_sel]
                     shared = [dict_list[i][ts-j][k] for k in atoms_in_sel]
-                    # calculate distances bases on mutual atoms
-                    msd[i][ts-j] = (msd[i][ts-j]*n_samples[i][ts-j] + np.power(
-                                    distance_vector(pos[i][0][shared0],
-                                                    pos[i][ts-j][shared],
-                                                    dim[ts-j]), 2).mean(axis=0)
-                                    ) / (n_samples[i][ts-j]+1)
-                    n_samples[i][ts-j] += 1
+                    try:
+                        if j>0:
+                            assert len(shared0)>0 and len(shared)>0
+                        # calculate distances bases on mutual atoms
+                        msd[i][ts-j] = (msd[i][ts-j]*n_samples[i][ts-j] + np.power(
+                                        distance_vector(pos[i][0][shared0],
+                                                        pos[i][ts-j][shared],
+                                                        dim[ts-j]), 2).mean(axis=0)
+                                        ) / (n_samples[i][ts-j]+1)
+                        n_samples[i][ts-j] += 1
+                    except:
+                        warnings.warn("\nShared: {0}\nShared_0: {1}\n".format(
+                            len(shared),len(shared0))+
+                                       "Warning: Shared lists empty on frame {0}".format(
+                            str(j))+
+                                       "\nThis occurs when no atoms within the selection"+
+                                       "at tau=0 remain at a later tau. This may result"+
+                                       "from very small selections, and could introduce"+
+                                       "NANs into the MSD array.",RuntimeWarning)
+                        sys.exit(1)
             if j % (100*self.dt_restart) == 0:
                 print("Frame: "+str(j))
             # Update deques
