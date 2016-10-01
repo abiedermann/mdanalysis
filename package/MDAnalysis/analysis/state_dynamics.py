@@ -46,9 +46,9 @@ class BinaryPair(object):
       reference : str
         string containing selection for reference
       cut1 : float
-        first cutoff (nm)
+        first cutoff (Angstroms)
       cut2 : float
-        second cutoff (nm)
+        second cutoff (Angstroms)
       max_order : int
         maximum order of interactions to track (note: there is always
         an extra catch all group)
@@ -56,6 +56,8 @@ class BinaryPair(object):
         first frame to analyze
       tf : int
         last frame to analyze
+      sel_frames : int
+        number of sel-frames analyzed
       out_name : str
         name of output pickle file
       write_output : bool
@@ -65,7 +67,7 @@ class BinaryPair(object):
     --------
     (out_file).p : pickle file
         pickle file in format [pair, end_pair, dominated,
-        handoff_counter, self.hop_counter]
+        aborted, handoff_counter, self.hop_counter]
     """
 
     def _gen_arrays(self):
@@ -97,12 +99,13 @@ class BinaryPair(object):
         self.universe = universe
         self.selection = selection
         self.reference = reference
-        self.cut1 = float(cut1) * 10  # convert from nm to Angstroms
-        self.cut2 = float(cut2) * 10
+        self.cut1 = float(cut1)
+        self.cut2 = float(cut2)
         self.max_order = int(max_order)
         self.t0 = int(t0)
         self.tf = int(tf)
         self.out_name = out_name
+        self.sel_frames = 0
         self.write_output = bool(write_output)
 
         """
@@ -283,6 +286,14 @@ class BinaryPair(object):
 
         return p_dict
 
+    '''
+    def _object_test(self):
+        keys = self.p_dict_time.keys()
+        for key in keys:
+            assert len(self.p_dict_time[key]) > 0
+        return
+    '''
+
     def _log_termination(self, store_array, this_order, time_dict, key,
                          this_frame):
         """logs termination events, recording the tuple: (list of ref
@@ -316,10 +327,11 @@ class BinaryPair(object):
 
         # get ref atom ids involved in pairing event
         values = time_dict[key].keys()
-
+        
         self._safe_add(
             store_array[this_order - 1], key,
             (values, (time_dict[key][values[0]], this_frame)), deque())
+        
         return
 
     def _handle_sels(self, sel_ids, ref_ids, this_frame):
@@ -343,6 +355,7 @@ class BinaryPair(object):
                 self._log_termination(self.aborted, self.p_dict_order.pop(sel),
                                       self.p_dict_time, sel, this_frame)
                 self.p_dict_time.pop(sel)
+                self.p_dict.pop(sel)
                 continue
             # if ref atom in pairing event moves outside of selection
             # causing pairing event to end
@@ -353,6 +366,7 @@ class BinaryPair(object):
                         self.aborted, self.p_dict_order.pop(sel),
                         self.p_dict_time, sel, this_frame)
                     self.p_dict_time.pop(sel)
+                    self.p_dict.pop(sel)
         return
 
     def _categorize_terminations(self, last_p_dict, this_frame):
@@ -416,6 +430,17 @@ class BinaryPair(object):
             # identify and handle hopping events
             if key in last_p_dict:
                 if self.p_dict[key].isdisjoint(last_p_dict[key]):
+
+                    isJuggle = False
+
+                    # checks for hops between bridged atoms
+                    for value in self.p_dict[key]:
+                        if value in last_p_dict_time[key].keys():
+                            isJuggle = True
+
+                    if isJuggle:
+                        continue
+
                     self.hop_counter += 1  # a hop has occurred
 
                     self._log_termination(
@@ -427,7 +452,7 @@ class BinaryPair(object):
                     #  by _categorize_terminations)
                     for value in last_p_dict_time[key].keys():
                         self.p_dict_time[key].pop(value)
-
+                    
                     self.p_dict_order[key] = len(self.p_dict[key])
 
                     # avoid looking for domination if a hopping event
@@ -441,15 +466,21 @@ class BinaryPair(object):
             if key not in self.p_dict_order:
                 self.p_dict_order[key] = len_key
 
+
             if len_key > self.p_dict_order[key]:
                 # Note: p_dict_order[key] currently refers to order at
                 # previous frame
                 self._log_termination(self.dominated, self.p_dict_order[key],
                                       last_p_dict_time, key, this_frame)
 
+                ######## IS THIS THE BUG #######################
+
+
                 # updating entries in p_dict_time to this_frame
                 for value in self.p_dict_time[key].keys():
                     self.p_dict_time[key][value] = this_frame
+
+                ################################################
 
                 # update order
                 self.p_dict_order[key] = len_key
@@ -457,7 +488,7 @@ class BinaryPair(object):
 
     def run(self):
         # check that trajectory length is correct
-        assert len(self.universe.trajectory) == (self.tf-self.t0+1), \
+        assert len(self.universe.trajectory) >= (self.tf-self.t0+1), \
             ("Sample interval exceeds trajectory length. This may result"
              "from choice of t0/tf or insufficient RAM when loading the"
              "trajectory.")
@@ -468,9 +499,12 @@ class BinaryPair(object):
             sel = self.universe.select_atoms(self.selection)
             ref = self.universe.select_atoms(self.reference)
 
+            self.sel_frames += len(sel)
+
             # handle pairing events which move out of selections
             if this_frame > self.t0:
                 self._handle_sels(tuple(sel.ids), tuple(ref.ids), this_frame)
+
 
             # storing data from previous frame
             last_p_dict = self.p_dict
@@ -481,12 +515,15 @@ class BinaryPair(object):
             self.p_dict = self._gen_dict(sel, ref, last_p_dict,
                                          this_frame)
 
+
             # categorize terminated events
             if this_frame > self.t0:
                 self._categorize_terminations(last_p_dict, this_frame)
+            
 
             # update order and identify hops
             self._update_order(last_p_dict, last_p_dict_time, this_frame)
+            
 
             # record unfinished pairing events at the end of the
             # simulation
@@ -499,14 +536,21 @@ class BinaryPair(object):
             # log progress for user
             if this_frame % 500 == 0:
                 print('Frame: ' + str(this_frame))
+                if self.write_output:
+                    pickle.dump([self.pair, self.end_pair, self.dominated,
+                         self.aborted, self.handoff_counter, self.hop_counter,
+                         self.sel_frames],
+                         open(self.out_name, 'wb'))
 
         if self.write_output:
             pickle.dump([self.pair, self.end_pair, self.dominated,
-                         self.aborted, self.handoff_counter, self.hop_counter],
+                         self.aborted, self.handoff_counter, self.hop_counter,
+                         self.sel_frames],
                     open(self.out_name, 'wb'))
         else:
             return [self.pair, self.end_pair, self.dominated,
-                    self.aborted, self.handoff_counter, self.hop_counter]
+                    self.aborted, self.handoff_counter, self.hop_counter,
+                    self.sel_frames]
 
         print("Complete!")
 
@@ -563,7 +607,9 @@ if __name__ == "__main__":
     }
     '''
 
+    print('Loading Universe...')
     u = MDAnalysis.Universe(opts['-s'], opts['-f'])
+    print('Complete!')
 
     this_BinaryPair = BinaryPair(
         u, opts['--sel'], opts['--ref'], opts['--cut1'], opts['--cut2'],
