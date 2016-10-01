@@ -330,7 +330,8 @@ def distance_vector(reference, configuration, box, backend="serial"):
             box = triclinic_vectors(triclinic_box(box[0], box[1], box[2]))
 
     confnum = conf.shape[0]
-    refnum = ref.shape[0]
+    
+    distances = np.zeros(confnum, np.float64)
 
     if boxtype == 'ortho':
         _run("calc_distance_vector_ortho",

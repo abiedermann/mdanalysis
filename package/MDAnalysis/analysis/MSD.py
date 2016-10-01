@@ -63,6 +63,10 @@ class MSD(object):
         (saves memory in array allocation)
     write_output : bool
         Specifies whether to write pickle file
+    max_data : bool
+        If true, include tau values after tf in calculation (this is
+        useful for avoiding data loss in command line parallelization
+        of analysis)
 
     Returns
     -------
@@ -73,7 +77,8 @@ class MSD(object):
     """
 
     def __init__(self, universe, select_list, t0, tf, dt_restart,
-                 out_name='msd', len_msd=250, write_output=True):
+                 out_name='msd', len_msd=250, write_output=True,
+                 max_data=False):
         self.universe = universe
         self.select_list = select_list
         if type(select_list) is str:
@@ -85,14 +90,20 @@ class MSD(object):
         self.out_name = out_name
         # handling short simulation cases
         n_frames = int(tf) - int(t0) + 1
-        if len_msd > n_frames:
-            len_msd = n_frames
-        self.len_msd = len_msd
+        if int(len_msd) > int(n_frames):
+            len_msd = int(n_frames)
+        self.len_msd = int(len_msd)
         self.write_output = write_output
+        self.max_data = max_data
 
-    def _select(self):
+    def _select(self,frame):
         """Generates list of atom groups that satisfy select_list
            strings
+
+        Parameters
+        ----------
+        frame : int
+            number of the current frame
 
         Returns
         -------
@@ -101,7 +112,16 @@ class MSD(object):
         """
         selections = []
         for i in range(len(self.select_list)):
-            selections.append(self.universe.select_atoms(self.select_list[i]))
+            try:
+                selections.append(self.universe.select_atoms(self.select_list[i]))
+                assert selections[i].n_atoms > 0
+            except:
+                try:
+                    selections.pop(i)
+                except:
+                    pass
+                selections.append(None)
+        
         return selections
 
     def _init_pos_deque(self):
@@ -146,20 +166,23 @@ class MSD(object):
                for i in range(self.len_msd)]
 
         print("Populating deque...")
-        for ts in self.universe.trajectory[self.t0:self.len_msd]:
-            selections = self._select()
+        for ts in self.universe.trajectory[self.t0:self.t0
+                                           + self.len_msd]:
             this_frame = ts.frame
+            selections = self._select(this_frame)
 
-            dim[this_frame] = ts.dimensions
+            dim[this_frame-self.t0] = ts.dimensions
             for i in range(n_sel):
-                pos[i][this_frame] = selections[i].positions
-                
-                temp_list = selections[i].atoms.ids
-                # store set of atom ids which satisfy selection
-                set_list[i][this_frame] = set(temp_list)
-                # link atom id to array index
-                for j in range(len(temp_list)):
-                    dict_list[i][this_frame][temp_list[j]] = j
+                if selections[i] is not None: # if there is data
+                    pos[i][this_frame-self.t0] = selections[i].positions
+                    
+                    temp_list = selections[i].atoms.ids
+                    # store set of atom ids which satisfy selection
+                    set_list[i][this_frame-self.t0] = set(temp_list)
+                    # link atom id to array index
+                    for j in range(len(temp_list)):
+                        dict_list[i][this_frame-self.t0][temp_list[j]] = j
+                    
             if this_frame % (self.len_msd/10) == 0:
                 print("Frame: "+str(this_frame))
         # converting lists to deques
@@ -194,7 +217,11 @@ class MSD(object):
         """
         # stop updating when there are no more frames to analyze
         top_frame = this_restart + self.len_msd
-        if top_frame+self.dt_restart > self.tf:
+        calc_cutoff = self.tf
+        if self.max_data:
+            calc_cutoff = len(self.universe.trajectory) - 1
+
+        if top_frame+self.dt_restart > calc_cutoff:
             # feed in zeros
             dim.append([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
             for i in range(len(self.select_list)):
@@ -205,20 +232,25 @@ class MSD(object):
         
         for ts in self.universe.trajectory[top_frame:top_frame
                                            + self.dt_restart]:
-            selections = self._select()
+            selections = self._select(ts.frame)
             dim.append(ts.dimensions)
 
             for i in range(len(selections)):
-                pos[i].append(selections[i].positions)
+                if selections[i] is not None: # if there is data
+                    pos[i].append(selections[i].positions)
 
-                temp_list = selections[i].atoms.ids
-                # store set of atom ids which satisfy selection
-                set_list[i].append(set(temp_list))
-                # link atom id to array index
-                temp_dict = dict()
-                for j in range(len(temp_list)):
-                    temp_dict[temp_list[j]] = j
-                dict_list[i].append(temp_dict)
+                    temp_list = selections[i].atoms.ids
+                    # store set of atom ids which satisfy selection
+                    set_list[i].append(set(temp_list))
+                    # link atom id to array index
+                    temp_dict = dict()
+                    for j in range(len(temp_list)):
+                        temp_dict[temp_list[j]] = j
+                    dict_list[i].append(temp_dict)
+                else:
+                    pos[i].append(np.array([]))
+                    set_list[i].append(set())
+                    dict_list[i].append(dict())
 
     def _process_pos_data(self, pos, set_list, dict_list, dim):
         """Runs MSD calculation and returns data
@@ -237,43 +269,44 @@ class MSD(object):
 
         n_samples = np.zeros((n_sel, self.len_msd), dtype='int')
         msd = np.zeros((n_sel, self.len_msd), dtype='float32')
+        
+        calc_cutoff = self.tf
+        if self.max_data:
+            calc_cutoff = len(self.universe.trajectory) - 1
 
         # for each restart point
         for j in range(self.t0, self.tf+1, self.dt_restart):
             for i in range(n_sel):  # for each selection
                 atoms_in_sel = set_list[i][0]  # storing initial set at restart
-                for ts in range(j, self.tf+1):  # for each frame after restart
+                for ts in range(j, calc_cutoff+1):  # for each frame after restart
                     # avoid computing irrelevantly long taus
                     if ts-j == self.len_msd:
                         break
+
                     # updating restart set to exclude any atoms which have
                     # left the selection since the restart point
                     atoms_in_sel = atoms_in_sel.intersection(set_list[i][ts-j])
+                    
                     # find mutual atoms at times 0 and ts-j
                     shared0 = [dict_list[i][0][k] for k in atoms_in_sel]
                     shared = [dict_list[i][ts-j][k] for k in atoms_in_sel]
-                    try:
-                        if j>0:
-                            assert len(shared0)>0 and len(shared)>0
-                        # calculate distances bases on mutual atoms
-                        msd[i][ts-j] = (msd[i][ts-j]*n_samples[i][ts-j] + np.power(
-                                        distance_vector(pos[i][0][shared0],
-                                                        pos[i][ts-j][shared],
-                                                        dim[ts-j]), 2).mean(axis=0)
-                                        ) / (n_samples[i][ts-j]+1)
-                        n_samples[i][ts-j] += 1
-                    except:
-                        warnings.warn("\nShared: {0}\nShared_0: {1}\n".format(
-                            len(shared),len(shared0))+
-                                       "Warning: Shared lists empty on frame {0}".format(
-                            str(j))+
-                                       "\nThis occurs when no atoms within the selection"+
-                                       "at tau=0 remain at a later tau. This may result"+
-                                       "from very small selections, and could introduce"+
-                                       "NANs into the MSD array.",RuntimeWarning)
-                        sys.exit(1)
-            if j % (100*self.dt_restart) == 0:
+                    
+                    # move to next restart if there's nothing to evaluate
+                    if len(shared) == 0:
+                        break # skip to next restart
+                    
+                    msd[i][ts-j] = (msd[i][ts-j]*n_samples[i][ts-j] + np.power(
+                                    distance_vector(pos[i][0][shared0],
+                                                    pos[i][ts-j][shared],
+                                                    dim[ts-j]), 2).mean(axis=0)
+                                    ) / (n_samples[i][ts-j]+1)
+                    n_samples[i][ts-j] += 1
+            
+            if j % (100) == 0:
                 print("Frame: "+str(j))
+                if self.write_output:
+                    pickle.dump([msd, n_samples], open(self.out_name, 'wb'))
+
             # Update deques
             self._update_deques(pos, set_list, dict_list, dim, j)
 
@@ -283,7 +316,7 @@ class MSD(object):
         """Analyze trajectory and output pickle object"""
 
         # check that trajectory length is correct
-        assert len(self.universe.trajectory) == (self.tf-self.t0+1), \
+        assert len(self.universe.trajectory) >= (self.tf-self.t0+1), \
             ("Sample interval exceeds trajectory length. This may result"
              "from choice of t0/tf or insufficient RAM when loading the"
              "trajectory.")
@@ -328,11 +361,14 @@ if __name__ == "__main__":
     -o output file name (optional)
     --len maximum number of tau frames to calculate (optional)
     --out write output boolean (optional, default=True)
+    --max_data include data from after tf if it exists
+      this allows for command-line level parallelization without
+      data loss. (optional, default=False)
     """
     os.system('')
     # handling input arguments
     this_opts, args = getopt.getopt(sys.argv[1:], "f:s:b:e:o:",
-                               ['dt=', 'sel=', 'len=', 'out='])
+                               ['dt=', 'sel=', 'len=', 'out=', 'max_data'])
     opts = dict()
     for opt, arg in this_opts:
         opts[opt] = arg
@@ -342,6 +378,10 @@ if __name__ == "__main__":
         opts["-o"] = "msd.p"
     if "--len" not in opts:
         opts["--len"] = 250
+    if "--max_data" in opts:
+        opts["--max_data"] = True
+    else:
+        opts["--max_data"] = False
     if "--out" in opts:
         if 'False' in opts['--out'] or 'false' in opts['--out']:
             opts['--out'] = False
@@ -354,5 +394,5 @@ if __name__ == "__main__":
     # safe_outdir(outdir)
     this_MSD = MSD(u, opts['--sel'], opts['-b'], opts['-e'], opts['--dt'],
                    out_name=opts['-o'], len_msd=opts['--len'],
-                   write_output=opts['--out'])
+                   write_output=opts['--out'],max_data=opts["--max_data"])
     this_MSD.run()
