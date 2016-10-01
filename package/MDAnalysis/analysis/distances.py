@@ -112,7 +112,7 @@ def contact_matrix(coord, cutoff=15.0, returntype="numpy", box=None):
             contact_matrix_no_pbc(coord, sparse_contacts, cutoff)
         return sparse_contacts
 
-def binary_contact_matrix(ref_coord, sel_coord, cutoff1=3.0, cutoff2=5.0, box):
+def binary_contact_matrix(ref_coord, sel_coord, cutoff1, cutoff2, box):
     '''Calculates 2 matrices of contacts corresponding state dynamics
        definitions.
 
@@ -122,8 +122,10 @@ def binary_contact_matrix(ref_coord, sel_coord, cutoff1=3.0, cutoff2=5.0, box):
        Array of coordinates of shape ``(N, 3)`` and dtype float32.
     sel_coord : array
        Array of coordinates of shape ``(N, 3)`` and dtype float32.
-    cutoff : float, optional, default 15
+    cutoff1 : float
        Particles within `cutoff` are considered to form a contact.
+    cutoff2 : float
+       Particles within `cutoff' are considered to form a contact.
     box : array-like
        Simulation cell dimensions in the form of
        :attr:`MDAnalysis.trajectory.base.Timestep.dimensions` when
@@ -154,13 +156,11 @@ def binary_contact_matrix(ref_coord, sel_coord, cutoff1=3.0, cutoff2=5.0, box):
     # of coordinates passed
     sparse_contacts1 = sparse.lil_matrix((len(ref_coord), len(sel_coord)), dtype='bool')
     sparse_contacts2 = sparse.lil_matrix((len(ref_coord), len(sel_coord)), dtype='bool')
+    
     if box is not None:
-	# with PBC
-	binary_contact_matrix_pbc(ref_coord, sel_coord, sparse_contacts1,
-		sparse_contacts2, box, cutoff1, cutoff2)
-    #else:
-	# without PBC
-    #    contact_matrix_no_pbc(coord, sparse_contacts, cutoff)
+	    binary_contact_matrix_pbc(ref_coord, sel_coord, sparse_contacts1,
+		                          sparse_contacts2, box, cutoff1, cutoff2)
+    
     return sparse_contacts1.nonzero(), sparse_contacts2.nonzero()
 
 def dist(A, B, offset=0):
