@@ -536,6 +536,11 @@ class BinaryPair(object):
             # log progress for user
             if this_frame % 500 == 0:
                 print('Frame: ' + str(this_frame))
+                if self.write_output:
+                    pickle.dump([self.pair, self.end_pair, self.dominated,
+                         self.aborted, self.handoff_counter, self.hop_counter,
+                         self.sel_frames],
+                         open(self.out_name, 'wb'))
 
         if self.write_output:
             pickle.dump([self.pair, self.end_pair, self.dominated,

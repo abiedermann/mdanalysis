@@ -277,7 +277,7 @@ def distance_array(reference, configuration, box=None, result=None, backend="ser
 
     return distances
 
-def distance_vector(reference, configuration, box, backend="serial"):
+def distance_vector(ref, conf, box, backend="serial"):
     """Calculate only the diagonals of the distance_array
 
     If there are *i* positions in reference, and *j* positions in configuration,
@@ -315,8 +315,9 @@ def distance_vector(reference, configuration, box, backend="serial"):
     .. versionchanged:: 0.13.0
        Added *backend* keyword.
     """
-    ref = reference.copy('C')
-    conf = configuration.copy('C')
+    #ref = reference.copy('C')
+    #conf = configuration.copy('C')
+    
 
     _check_array(conf, 'conf')
     _check_array(ref, 'ref')
