@@ -27,7 +27,7 @@ import pickle
 # from six import range
 
 import MDAnalysis
-from MDAnalysis.analysis.distances import distance_vector
+from MDAnalysis.analysis.distances import squared_distance_vector
 
 
 class MSD(object):
@@ -295,10 +295,10 @@ class MSD(object):
                     if len(shared) == 0:
                         break # skip to next restart
                     
-                    msd[i][ts-j] = (msd[i][ts-j]*n_samples[i][ts-j] + np.power(
-                                    distance_vector(pos[i][0][shared0],
+                    msd[i][ts-j] = (msd[i][ts-j]*n_samples[i][ts-j] +
+                                    sqaured_distance_vector(pos[i][0][shared0],
                                                     pos[i][ts-j][shared],
-                                                    dim[ts-j]), 2).mean(axis=0)
+                                                    dim[ts-j]).mean(axis=0)
                                     ) / (n_samples[i][ts-j]+1)
                     n_samples[i][ts-j] += 1
             

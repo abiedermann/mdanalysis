@@ -46,7 +46,7 @@ Functions
 ---------
 
 .. autofunction:: distance_array(reference, configuration [, box [, result [, backend]]])
-.. autofunction:: distance_vector(reference, configuration [, box[, result [, backend]]])
+.. autofunction:: squared_distance_vector(reference, configuration [, result [, backend]]])
 .. autofunction:: self_distance_array(reference [, box [,result [, backend]]])
 .. autofunction:: calc_bonds(atom1, atom2 [, box, [, result [, backend]]])
 .. autofunction:: calc_angles(atom1, atom2, atom3 [,box [, result [, backend]]])
@@ -94,7 +94,7 @@ def _run(funcname, args=None, kwargs=None, backend="serial"):
 # the core and topology modules)
 from .c_distances import (calc_distance_array,
                           calc_distance_array_ortho,
-                          calc_distance_vector_ortho,
+                          calc_squared_distance_vector,
                           calc_distance_array_triclinic,
                           calc_self_distance_array,
                           calc_self_distance_array_ortho,
@@ -277,30 +277,23 @@ def distance_array(reference, configuration, box=None, result=None, backend="ser
 
     return distances
 
-def distance_vector(ref, conf, box, backend="serial"):
+def squared_distance_vector(ref, conf, backend="serial"):
     """Calculate only the diagonals of the distance_array
 
     If there are *i* positions in reference, and *j* positions in configuration,
     will calculate a *i* x 1 vector of distances. This requires that i==j.
-    If an *box* is supplied then a minimum image convention is used when
-    calculating distances.
 
     If a 2D numpy array of dtype ``numpy.float64`` with the shape ``(len(reference),
     len(configuration))`` is provided in *result* then this preallocated array is
     filled. This can speed up calculations.
 
-    d = distance_vector(reference, configuration, box[,backend="serial"])
+    d = squared_distance_vector(reference, configuration, box[,backend="serial"])
 
     :Arguments:
         *reference*
              reference coordinate array (must be numpy.float32)
         *configuration*
              configuration coordinate array (must be numpy.float32)
-        *box*
-             cell dimensions (minimum image convention is applied)
-             Cell dimensions must be in an identical to format to those returned
-             by :attr:`MDAnalysis.coordinates.base.Timestep.dimensions`,
-             [lx, ly, lz, alpha, beta, gamma]
         *backend*
              select the type of acceleration; "serial" is always available. Other
              possibilities are "OpenMP" (OpenMP).
@@ -318,30 +311,16 @@ def distance_vector(ref, conf, box, backend="serial"):
     #ref = reference.copy('C')
     #conf = configuration.copy('C')
     
-
     _check_array(conf, 'conf')
     _check_array(ref, 'ref')
-
-    if box is not None:
-        boxtype = _box_check(box)
-        # Convert [A,B,C,alpha,beta,gamma] to [[A],[B],[C]]
-        if (boxtype == 'tri_box'):
-            box = triclinic_vectors(box)
-        if (boxtype == 'tri_vecs_bad'):
-            box = triclinic_vectors(triclinic_box(box[0], box[1], box[2]))
 
     confnum = conf.shape[0]
     
     distances = np.zeros(confnum, np.float64)
 
-    if boxtype == 'ortho':
-        _run("calc_distance_vector_ortho",
-               args=(ref, conf, box, distances),
-               backend=backend)
-    else:
-        _run("calc_distance_vector_triclinic",
-               args=(ref, conf, box, distances),
-               backend=backend)
+    _run("calc_squared_distance_vector",
+            args=(ref, conf, confnum, distances),
+            backend=backend)
 
     return distances
 
