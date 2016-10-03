@@ -143,6 +143,9 @@ class MSD(object):
             contains dictionaries which map atom ids to corresponding
             pos index, organized:
             selection X frame X dict
+        dim : list
+            contains box dimensions at each frame, organized:
+            frame X box dimensions
         """
 
         n_sel = len(self.select_list)
@@ -158,6 +161,9 @@ class MSD(object):
         # pre-allocate position array
         pos = [[np.array([]) for j in range(self.len_msd)]
                for i in range(n_sel)]
+        # pre-allocate array containing box dimensions
+        dim = [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+               for i in range(self.len_msd)]
 
         print("Populating deque...")
         for ts in self.universe.trajectory[self.t0:self.t0
@@ -165,6 +171,7 @@ class MSD(object):
             this_frame = ts.frame
             selections = self._select(this_frame)
 
+            dim[this_frame-self.t0] = ts.dimensions
             for i in range(n_sel):
                 if selections[i] is not None: # if there is data
                     pos[i][this_frame-self.t0] = selections[i].positions
@@ -179,15 +186,16 @@ class MSD(object):
             if this_frame % (self.len_msd/10) == 0:
                 print("Frame: "+str(this_frame))
         # converting lists to deques
+        dim = deque(dim, maxlen=self.len_msd)
         for i in range(n_sel):
             dict_list[i] = deque(dict_list[i], maxlen=self.len_msd)
             set_list[i] = deque(set_list[i], maxlen=self.len_msd)
             pos[i] = deque(pos[i], maxlen=self.len_msd)
         print("Complete!")
 
-        return pos, set_list, dict_list
+        return pos, set_list, dict_list, dim
 
-    def _update_deques(self, pos, set_list, dict_list, this_restart):
+    def _update_deques(self, pos, set_list, dict_list, dim, this_restart):
         """Updates lists necessary for MSD calculations
 
         Returns:
@@ -203,6 +211,9 @@ class MSD(object):
             contains dictionaries which map atom ids to corresponding
             pos index, organized:
             selection X frame X dict
+        dim : list
+            contains box dimensions at each frame, organized:
+            frame X box dimensions
         """
         # stop updating when there are no more frames to analyze
         top_frame = this_restart + self.len_msd
@@ -212,6 +223,7 @@ class MSD(object):
 
         if top_frame+self.dt_restart > calc_cutoff:
             # feed in zeros
+            dim.append([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
             for i in range(len(self.select_list)):
                 pos[i].append(np.array([]))
                 set_list[i].append(set())
@@ -221,6 +233,7 @@ class MSD(object):
         for ts in self.universe.trajectory[top_frame:top_frame
                                            + self.dt_restart]:
             selections = self._select(ts.frame)
+            dim.append(ts.dimensions)
 
             for i in range(len(selections)):
                 if selections[i] is not None: # if there is data
@@ -239,7 +252,7 @@ class MSD(object):
                     set_list[i].append(set())
                     dict_list[i].append(dict())
 
-    def _process_pos_data(self, pos, set_list, dict_list):
+    def _process_pos_data(self, pos, set_list, dict_list, dim):
         """Runs MSD calculation and returns data
 
         Returns:
@@ -284,7 +297,8 @@ class MSD(object):
                     
                     msd[i][ts-j] = (msd[i][ts-j]*n_samples[i][ts-j] +
                                     squared_distance_vector(pos[i][0][shared0],
-                                            pos[i][ts-j][shared]).mean(axis=0)
+                                                    pos[i][ts-j][shared],
+                                                    dim[ts-j]).mean(axis=0)
                                     ) / (n_samples[i][ts-j]+1)
                     n_samples[i][ts-j] += 1
             
@@ -294,7 +308,7 @@ class MSD(object):
                     pickle.dump([msd, n_samples], open(self.out_name, 'wb'))
 
             # Update deques
-            self._update_deques(pos, set_list, dict_list, j)
+            self._update_deques(pos, set_list, dict_list, dim, j)
 
         return msd, n_samples
 
@@ -307,9 +321,9 @@ class MSD(object):
              "from choice of t0/tf or insufficient RAM when loading the"
              "trajectory.")
 
-        pos, set_list, dict_list, = self._init_pos_deque()
+        pos, set_list, dict_list, dim = self._init_pos_deque()
 
-        msd, n_samples = self._process_pos_data(pos, set_list, dict_list)
+        msd, n_samples = self._process_pos_data(pos, set_list, dict_list, dim)
 
         if self.write_output:
             pickle.dump([msd, n_samples], open(self.out_name, 'wb'))

@@ -32,7 +32,7 @@ __all__ = ['distance_array', 'self_distance_array', 'contact_matrix', 'dist']
 
 import numpy as np
 
-from MDAnalysis.lib.distances import distance_array, distance_vector, self_distance_array
+from MDAnalysis.lib.distances import distance_array, self_distance_array
 from MDAnalysis.lib.c_distances import contact_matrix_no_pbc, contact_matrix_pbc, binary_contact_matrix_pbc
 
 import warnings
@@ -150,7 +150,7 @@ def binary_contact_matrix(ref_coord, sel_coord, cutoff1, cutoff2, box):
     if sparse is None:
 	# hack: if we are running with minimal dependencies then scipy was
 	#       not imported and we have to bail here (see scipy import at top)
-	raise ImportError("For sparse matrix functionality you need to "
+	    raise ImportError("For sparse matrix functionality you need to "
 			  "import scipy.")
     # Initialize square List of Lists matrix of dimensions equal to number
     # of coordinates passed

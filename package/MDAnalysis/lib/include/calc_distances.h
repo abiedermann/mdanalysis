@@ -145,19 +145,26 @@ static void _calc_distance_array(coordinate* ref, int numref, coordinate* conf,
 }
 
 static void _calc_squared_distance_vector(coordinate* ref, int numref, coordinate* conf,
-                                  double* distances)
+                                  double* distances, float* box)
 {
   int i;
   double dx[3];
-  double rsq;
+  float inverse_box[3];
+
+  inverse_box[0] = 1.0 / box[0];
+  inverse_box[1] = 1.0 / box[1];
+  inverse_box[2] = 1.0 / box[2];
 
 #ifdef PARALLEL
-#pragma omp parallel for private(i, dx, rsq) shared(distances)
+#pragma omp parallel for private(i, dx) shared(distances)
 #endif
   for (i=0; i<numref; i++) {
     dx[0] = conf[i][0] - ref[i][0];
     dx[1] = conf[i][1] - ref[i][1];
     dx[2] = conf[i][2] - ref[i][2];
+    
+    //minimum_image(dx, box, inverse_box);
+    
     *(distances+i) = (dx[0]*dx[0]) + (dx[1]*dx[1]) + (dx[2]*dx[2]);
   }
 }

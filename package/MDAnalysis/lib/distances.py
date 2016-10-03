@@ -277,7 +277,7 @@ def distance_array(reference, configuration, box=None, result=None, backend="ser
 
     return distances
 
-def squared_distance_vector(ref, conf, backend="serial"):
+def squared_distance_vector(ref, conf, box, backend="serial"):
     """Calculate only the diagonals of the distance_array
 
     If there are *i* positions in reference, and *j* positions in configuration,
@@ -319,7 +319,7 @@ def squared_distance_vector(ref, conf, backend="serial"):
     distances = np.zeros(confnum, np.float64)
 
     _run("calc_squared_distance_vector",
-            args=(ref, conf, confnum, distances),
+            args=(ref, conf, confnum, distances, box),
             backend=backend)
 
     return distances
