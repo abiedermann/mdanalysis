@@ -14,8 +14,73 @@
 # J. Comput. Chem. 32 (2011), 2319--2327, doi:10.1002/jcc.21787
 #
 
+"""
+MSD --- :mod:'MDAnalysis.analysis.MSD'
+==============================================================
+
+:Author: Andrew Biedermann
+:Year: 2016
+:Copyright: GNU Public License v3
+
+This module implements an extension of the stable-states residence time
+calculation proposed by Laage and Hynes. It logs and characterizes pairing
+events, outputting data which can be used to estimate the mean residence time
+(MRT) of a selected atom group with respect to a reference atom group. The
+calculation is sensitive to the number of reference atoms involved in each
+pairing event, allowing one to analyze the influence of higher order pairing
+interactions on the transport of atoms in the selected atom group. An example
+of how to calculate the MRT from output data is included in comments within
+the state_dynamics.py module.
+
+For convenience, command line options are included. See the main method of
+the state_dynamics.py module for python script implementation.
+
+state_dynamics command line usage
+---------------------------------
+
+This generates data which can be used to calculate the MRT of Cl with respect
+to Na:
+
+    >>> ./state_dynamics.py -f mysim.trr -s mysim.tpr --sel 'name CL'
+        --ref 'name NA' --cut1=3.0 --cut2=4.0 --max_order=1 -b 0 -e 50000
+        -o mrt_data.p
+
+By specifying --max_order=1, pairing events will be categorized as events
+where the Cl atom is paired to only 1 Na atom and events where the Cl atom
+is paired to >1 Na atom. If you specify --max_order=3, data will be split
+into events with Cl paired to 1, 2, or 3 Na atoms, with a 4th category which
+holds all events where Cl is paired to >3 Na atoms. If you don't care about
+the orders of interaction, --max_order=0 will calculate the MRT as defined by
+Laage and Hynes.
+
+Options:
+--------
+-f name of trajectory file
+-s name of tpr file
+--sel selection for selection atoms
+--ref selection for reference atoms
+--cut1 inner cutoff radius (nm)
+--cut2 outer cutoff radius (nm)
+--max_order maximum bond order to calculate
+-b t0 (frames)
+-e tf (frames)
+-o output file name (optional)
+--out write_output boolean (default=True)
+
+References
+----------
+
+Damien Laage and James T Hynes. On the residence time for water in a
+solute hydration shell: application to aqueous halide solutions. The Journal
+of Physical Chemistry B, 112(26):7697–7701, 2008.
+
+Scott H Northrup and James T Hynes. The stable states picture of chemical
+reactions. i. formulation for rate constants and initial condition effects. The
+Journal of Chemical Physics, 73(6):2700–2714, 1980.
+"""
+
+
 import sys
-import os
 import getopt
 import copy
 
@@ -56,8 +121,6 @@ class BinaryPair(object):
         first frame to analyze
       tf : int
         last frame to analyze
-      sel_frames : int
-        number of sel-frames analyzed
       out_name : str
         name of output pickle file
       write_output : bool
@@ -95,7 +158,7 @@ class BinaryPair(object):
         return pair, end_pair, dominated, aborted
 
     def __init__(self, universe, selection, reference, cut1, cut2, max_order,
-                 t0, tf, out_name='state_dynamics',write_output=True):
+                 t0, tf, out_name='state_dynamics', write_output=True):
         self.universe = universe
         self.selection = selection
         self.reference = reference
@@ -109,7 +172,7 @@ class BinaryPair(object):
         self.write_output = bool(write_output)
 
         """
-        Internal variable definitions:
+        Variable definitions:
         ------------------------------
             p_dict : dict(sets)
                 Contains all atoms participating in pairing events
@@ -233,10 +296,10 @@ class BinaryPair(object):
 
         Parameters:
         -----------
-            sel_ids : tuple
-                Contains atom ids which satisfy the selection string
-            ref_ids : tuple
-                Contains atom ids which satisfy the reference string
+            sel : AtomGroup
+                atom group corresponding to selected atoms
+            ref : AtomGroup
+                atom group corresponding to reference atoms
             last_p_dict : dict(sets)
                 p_dict from the previous frame
             this_frame : int
@@ -285,14 +348,6 @@ class BinaryPair(object):
                     self._safe_add(p_dict, key, value, set())
 
         return p_dict
-
-    '''
-    def _object_test(self):
-        keys = self.p_dict_time.keys()
-        for key in keys:
-            assert len(self.p_dict_time[key]) > 0
-        return
-    '''
 
     def _log_termination(self, store_array, this_order, time_dict, key,
                          this_frame):
@@ -344,10 +399,9 @@ class BinaryPair(object):
                 selections from selection str for current frame
             ref_ids: tuple(ints)
                 selections from reference str for current frame
-            last_sel_ids : tuple(ints)
-                selections from selection str for previous frame
-            last_ref_ids : tuple(ints)
-                selections from reference str for previous frame
+            this_frame : int
+                Current frame, used as the ending frame in the pairing
+                interval
         """
         # if sel atom in pairing event moves outside of selection
         for sel in self.p_dict.keys():
@@ -431,14 +485,14 @@ class BinaryPair(object):
             if key in last_p_dict:
                 if self.p_dict[key].isdisjoint(last_p_dict[key]):
 
-                    isJuggle = False
+                    is_juggle = False
 
                     # checks for hops between bridged atoms
                     for value in self.p_dict[key]:
                         if value in last_p_dict_time[key].keys():
-                            isJuggle = True
+                            is_juggle = True
 
-                    if isJuggle:
+                    if is_juggle:
                         continue
 
                     self.hop_counter += 1  # a hop has occurred
@@ -466,21 +520,15 @@ class BinaryPair(object):
             if key not in self.p_dict_order:
                 self.p_dict_order[key] = len_key
 
-
             if len_key > self.p_dict_order[key]:
                 # Note: p_dict_order[key] currently refers to order at
                 # previous frame
                 self._log_termination(self.dominated, self.p_dict_order[key],
                                       last_p_dict_time, key, this_frame)
 
-                ######## IS THIS THE BUG #######################
-
-
                 # updating entries in p_dict_time to this_frame
                 for value in self.p_dict_time[key].keys():
                     self.p_dict_time[key][value] = this_frame
-
-                ################################################
 
                 # update order
                 self.p_dict_order[key] = len_key
@@ -505,7 +553,6 @@ class BinaryPair(object):
             if this_frame > self.t0:
                 self._handle_sels(tuple(sel.ids), tuple(ref.ids), this_frame)
 
-
             # storing data from previous frame
             last_p_dict = self.p_dict
             # recursively copy data
@@ -515,15 +562,12 @@ class BinaryPair(object):
             self.p_dict = self._gen_dict(sel, ref, last_p_dict,
                                          this_frame)
 
-
             # categorize terminated events
             if this_frame > self.t0:
                 self._categorize_terminations(last_p_dict, this_frame)
-            
 
             # update order and identify hops
             self._update_order(last_p_dict, last_p_dict_time, this_frame)
-            
 
             # record unfinished pairing events at the end of the
             # simulation
@@ -538,21 +582,128 @@ class BinaryPair(object):
                 print('Frame: ' + str(this_frame))
                 if self.write_output:
                     pickle.dump([self.pair, self.end_pair, self.dominated,
-                         self.aborted, self.handoff_counter, self.hop_counter,
-                         self.sel_frames],
-                         open(self.out_name, 'wb'))
+                                 self.aborted, self.handoff_counter,
+                                 self.hop_counter, self.sel_frames],
+                                open(self.out_name, 'wb'))
 
         if self.write_output:
             pickle.dump([self.pair, self.end_pair, self.dominated,
                          self.aborted, self.handoff_counter, self.hop_counter,
                          self.sel_frames],
-                    open(self.out_name, 'wb'))
+                        open(self.out_name, 'wb'))
         else:
             return [self.pair, self.end_pair, self.dominated,
                     self.aborted, self.handoff_counter, self.hop_counter,
                     self.sel_frames]
 
         print("Complete!")
+
+"""
+import numpy as np
+import pickle
+import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
+
+def restimeFunc(t,tau):
+    return np.exp(t/tau*(-1))
+
+def fit(xdata,ydata,interval):
+    '''
+    Returns fitted ydata, MRT, err_MRT
+    '''
+    popt, pcov = curve_fit(restimeFunc,xdata[:interval],ydata[:interval])
+    fit_data = restimeFunc(xdata[:interval],*popt)
+    return fit_data, popt[0], np.sqrt(pcov)[0][0]
+
+def calcResTime(order,data,numFrames,interval,ts):
+    '''Plots MRT data and returns MRT and uncertainty in MRT
+
+    Parameters
+    ----------
+    order : int
+        order of interaction - 1 (since storage index is zero)
+        (if you want first order pairing, order = 0, etc.)
+    data : [pair, end_pair, dominated, aborted, handoff_counter, hop_counter,
+            sel_frames]
+        data loaded from the pickle file
+    numFrames : int
+        number of frames analyzed (for example: -b 0 -e 1000 --> 1001 frames)
+    interval : int
+        fits data from 0 to (interval) to calculate the MRT
+    ts : int
+        time step used in simulation
+    '''
+
+    pCounter = np.zeros(numFrames,dtype="int")
+    end_pCounter = np.zeros(numFrames,dtype="int")
+
+    # counting pairing events
+    for key in data[0][order].keys():
+        for i in range(len(data[0][order][key])):
+            b = data[0][order][key][i][1][0]
+            e = data[0][order][key][i][1][1]
+            pCounter[e-b] += 1
+
+    # counting unterminated pairing events
+    for key in data[1][order].keys():
+        for i in range(len(data[1][order][key])):
+            b = data[1][order][key][i][1][0]
+            e = data[1][order][key][i][1][1]
+            end_pCounter[e-b] += 1
+
+    tot_pairs = float(pCounter.sum() + end_pCounter.sum())
+
+    # calculating 1-(probability that ion is unbound)
+    p_paired = np.zeros(numFrames)
+
+    for i in range(numFrames):
+        p_paired[i] = 1 - float(pCounter[:i+1].sum())/tot_pairs
+
+    xdata = [i*ts for i in range(numFrames)]
+
+    ydata, MRT, err_MRT = fit(xdata,p_paired,interval)
+
+    plt.figure()
+    plt.scatter(xdata[:interval],pCounter[:interval])
+    plt.scatter(xdata[:interval],end_pCounter[:interval])
+    plt.xlabel('Pairing Interval Length (ps)',size=20)
+    plt.ylabel('Frequency',size=20)
+
+    plt.figure()
+    plt.plot(xdata[:interval],p_paired[:interval],label='Data')
+    plt.plot(xdata[:interval],ydata[:interval],label='Fit')
+    plt.xlabel('Pairing Interval Length (ps)',size=20)
+    plt.ylabel(r'P$_p$(t)',size=20)
+    plt.axes().set_yscale('log')
+    plt.legend(loc='best')
+
+    plt.show()
+
+    return MRT, err_MRT
+
+if __name__ == "__main__":
+
+    p_or_b = 'bind'
+    species = "Na"
+    orders = [0,1,2,3]
+
+    numFrames = 1001
+    fit_interval = 50
+    ts = 2 # ps
+
+    # list with dimensions: order X [data, err_data]
+    results = [[0,0] for i in range(len(orders))]
+
+    data = pickle.load(open('your_file.p','rb'))
+
+    for order in orders:
+        plt.figure()
+
+        results[order][0], results[order] = \
+                calcResTime(order,data,numFrames,fit_interval,ts)
+
+    print(results)
+"""
 
 if __name__ == "__main__":
     """
@@ -570,7 +721,6 @@ if __name__ == "__main__":
     -o output file name (optional)
     --out write_output boolean (default=True)
     """
-    os.system('')
 
     # handling input arguments
     this_opts, args = getopt.getopt(
@@ -586,26 +736,9 @@ if __name__ == "__main__":
         opts["-o"] = "state_dynamics.p"
     if "--out" in opts:
         if 'False' in opts['--out'] or 'false' in opts['--out']:
-            opts['--out']=False
+            opts['--out'] = False
     if "--out" not in opts:
         opts["--out"] = True
-
-    '''
-    # For testing purposes
-    opts = {
-        '-s' : 'test.tpr',
-        '-f' : 'test.xtc',
-        '--sel' : 'name CL',
-        '--ref' : 'name NA',
-        '--max_order' : 1,
-        '-b' : 0,
-        '-e' : 1000,
-        '-o' : 'test.p',
-        '--cut1' : 0.3,
-        '--cut2' : 0.4,
-        '--out' : True
-    }
-    '''
 
     print('Loading Universe...')
     u = MDAnalysis.Universe(opts['-s'], opts['-f'])

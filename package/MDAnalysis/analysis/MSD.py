@@ -14,6 +14,73 @@
 # J. Comput. Chem. 32 (2011), 2319--2327, doi:10.1002/jcc.21787
 #
 
+"""
+MSD --- :mod:'MDAnalysis.analysis.MSD'
+==============================================================
+
+:Author: Andrew Biedermann
+:Year: 2016
+:Copyright: GNU Public License v3
+
+This tool uses all available data to calculate the mean squared displacement
+(MSD) as a function of time, averaging over all atoms in the atom selection
+and all restarts. The MSD of any atom selection can be calculated,
+as any atoms which remain within the atom group over an entire time interval
+are included in the calculation, allowing for highly specific, position-
+dependent MSD calculations. The tool is robust to zero-length atom selections,
+and allows for the calculation of multiple atom selections simultaneously.
+Additional command line functionality is built in to allow for easy use
+in a batch/slurm scheduler and parallelization of especially large jobs.
+
+Important Note: Calculations are run on the trajectory as given to the tool,
+so some preprocessing may be required to properly account for periodic
+boundary conditions. For example, if calculating the MSD of a Gromacs
+simulation, the following preprocessing is necessary:
+    >>> gmx trjconv -f mysim.xtc -s mysim.tpr -o processed_sim.xtc -pbc nojump
+
+MSD command line usage
+----------------------
+
+This calculates the MSD of 3 atom selections over the first 50000 frames
+of the trajectory:
+
+    >>> ./MSD.py -f mysim.xtc -s mysim.tpr --sel 'name NA,name NA and prop z
+            > 50 and prop z < 150, name CL' -b 0 -e 50000 --dt 5 -o mysim.p
+            --len 1500
+
+Output will be written to mysim.p in the format [msd,n_samples], where msd
+is a vector of length=3 containing vectors of MSD values with index
+corresponding to time interval, and n_samples is a similar array containing
+the number of samples associated with each index in msd.
+
+The option --len alters the number of calculations performed by the tool. If
+you are taking a linear regression of the MSD vs tau plot over the first 'n'
+frames, adjusting this parameter allows you to collect the data you need,
+allowing you to avoid calculating MSD values at tau >= n+1.
+
+The option --max_data will use data after the frame specified by -e if it is
+available. This allows you to avoid losing data if you need to split the
+calculation over several parallel jobs.
+
+See the main method of MSD.py for an example of python script implementation.
+
+Options:
+--------
+-f name of trajectory file
+-s name of tpr file
+--sel string containing selections separated by commas
+-b t0 (frames)
+-e tf (frames)
+--dt number of frames between restarts
+-o output file name (optional)
+--len maximum number of tau frames to calculate (optional, default=250)
+--out write output boolean (optional, default=True)
+--max_data include data from after tf if it exists
+  this allows for command-line level parallelization without
+  data loss. (optional, default=False)
+"""
+
+
 from __future__ import absolute_import, print_function, division
 
 import sys
@@ -31,7 +98,7 @@ from MDAnalysis.lib.distances import squared_distance_vector
 
 
 class MSD(object):
-    """Object for calculating Mean Square Displacement (MSD)
+    """Object for calculating mean square displacement (MSD)
 
     This object can be used to accurately calculate the MSD of dynamic
     (or static) selections (for example: name CL and z > 50, etc.).
@@ -96,7 +163,7 @@ class MSD(object):
         self.write_output = write_output
         self.max_data = max_data
 
-    def _select(self,frame):
+    def _select(self, frame):
         """Generates list of atom groups that satisfy select_list
            strings
 
@@ -166,7 +233,7 @@ class MSD(object):
             selections = self._select(this_frame)
 
             for i in range(n_sel):
-                if selections[i] is not None: # if there is data
+                if selections[i] is not None:  # if there is data
                     pos[i][this_frame-self.t0] = selections[i].positions
                     
                     temp_list = selections[i].atoms.ids
@@ -190,8 +257,8 @@ class MSD(object):
     def _update_deques(self, pos, set_list, dict_list, this_restart):
         """Updates lists necessary for MSD calculations
 
-        Returns:
-        --------
+        Parameters:
+        -----------
         pos : list
             contains position information, organized:
             selection X frame X atom X (x, y, z)
@@ -203,6 +270,8 @@ class MSD(object):
             contains dictionaries which map atom ids to corresponding
             pos index, organized:
             selection X frame X dict
+        this_restart : int
+            frame number of the current restart
         """
         # stop updating when there are no more frames to analyze
         top_frame = this_restart + self.len_msd
@@ -223,7 +292,7 @@ class MSD(object):
             selections = self._select(ts.frame)
 
             for i in range(len(selections)):
-                if selections[i] is not None: # if there is data
+                if selections[i] is not None:  # if there is data
                     pos[i].append(selections[i].positions)
 
                     temp_list = selections[i].atoms.ids
@@ -241,6 +310,20 @@ class MSD(object):
 
     def _process_pos_data(self, pos, set_list, dict_list):
         """Runs MSD calculation and returns data
+
+        Parameters:
+        -----------
+        pos : list
+            contains position information, organized:
+            selection X frame X atom X (x, y, z)
+        set_list : list
+            contains set of atoms which satisfy each selection at each
+            frame, organized:
+            selection X frame X set of atom ids
+        dict_list : list
+            contains dictionaries which map atom ids to corresponding
+            pos index, organized:
+            selection X frame X dict
 
         Returns:
         --------
@@ -280,15 +363,15 @@ class MSD(object):
                     
                     # move to next restart if there's nothing to evaluate
                     if len(shared) == 0:
-                        break # skip to next restart
+                        break  # skip to next restart
                     
                     msd[i][ts-j] = (msd[i][ts-j]*n_samples[i][ts-j] +
                                     squared_distance_vector(pos[i][0][shared0],
-                                            pos[i][ts-j][shared]).mean(axis=0)
+                                    pos[i][ts-j][shared]).mean(axis=0)
                                     ) / (n_samples[i][ts-j]+1)
                     n_samples[i][ts-j] += 1
             
-            if j % (100) == 0:
+            if j % 100 == 0:
                 print("Frame: "+str(j))
                 if self.write_output:
                     pickle.dump([msd, n_samples], open(self.out_name, 'wb'))
@@ -354,7 +437,8 @@ if __name__ == "__main__":
     os.system('')
     # handling input arguments
     this_opts, args = getopt.getopt(sys.argv[1:], "f:s:b:e:o:",
-                               ['dt=', 'sel=', 'len=', 'out=', 'max_data'])
+                                    ['dt=', 'sel=', 'len=',
+                                     'out=', 'max_data'])
     opts = dict()
     for opt, arg in this_opts:
         opts[opt] = arg
@@ -380,5 +464,5 @@ if __name__ == "__main__":
     # safe_outdir(outdir)
     this_MSD = MSD(u, opts['--sel'], opts['-b'], opts['-e'], opts['--dt'],
                    out_name=opts['-o'], len_msd=opts['--len'],
-                   write_output=opts['--out'],max_data=opts["--max_data"])
+                   write_output=opts['--out'], max_data=opts["--max_data"])
     this_MSD.run()
