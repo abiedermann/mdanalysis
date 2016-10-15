@@ -15,7 +15,7 @@
 #
 
 """
-MSD --- :mod:'MDAnalysis.analysis.MSD'
+state_dynamics --- :mod:'MDAnalysis.analysis.state_dynamics'
 ==============================================================
 
 :Author: Andrew Biedermann
