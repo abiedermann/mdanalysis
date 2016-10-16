@@ -69,13 +69,13 @@ Options:
 -f name of trajectory file
 -s name of tpr file
 --sel string containing selections separated by commas
--b t0 (frames)
--e tf (frames)
+-b start_frame (frames)
+-e stop_frame (frames)
 --dt number of frames between restarts
 -o output file name (optional)
 --len maximum number of tau frames to calculate (optional, default=250)
 --out write output boolean (optional, default=True)
---max_data include data from after tf if it exists
+--max_data include data from after stop_frame if it exists
   this allows for command-line level parallelization without
   data loss. (optional, default=False)
 """
@@ -84,7 +84,6 @@ Options:
 from __future__ import absolute_import, print_function, division
 
 import sys
-import os
 import getopt
 import warnings
 from collections import deque
@@ -117,9 +116,9 @@ class MSD(object):
         Universe object containing trajectory data
     select_list : list
         List of selection strings
-    t0 : int
+    start_frame : int
         Time when analysis begins (in frames)
-    tf : int
+    stop_frame : int
         Time when analysis ends (in frames)
     dt_restart : int
         Spacing of restarts (in frames)
@@ -131,46 +130,43 @@ class MSD(object):
     write_output : bool
         Specifies whether to write pickle file
     max_data : bool
-        If true, include tau values after tf in calculation (this is
+        If true, include tau values after stop_frame in calculation (this is
         useful for avoiding data loss in command line parallelization
         of analysis)
-
-    Returns
-    -------
-    (out_name) : pickle file
-        pickle file in format [msd, n_samples] where msd and n_samples
-        have len(select_list) lists containing results, indexed
-        according to the value of tau (in frames). (i.e. in order)
     """
 
-    def __init__(self, universe, select_list, t0, tf, dt_restart,
+    def __init__(self, universe, select_list, start_frame, stop_frame, dt_restart,
                  out_name='msd', len_msd=250, write_output=True,
                  max_data=False):
         self.universe = universe
         self.select_list = select_list
-        if type(select_list) is str:
+        if isinstance(select_list, str):
             self.select_list = select_list.split(',')
         print(self.select_list)
-        self.t0 = int(t0)
-        self.tf = int(tf)
+        self.start_frame = int(start_frame)
+        self.stop_frame = int(stop_frame)
         self.dt_restart = int(dt_restart)
         self.out_name = out_name
         # handling short simulation cases
-        n_frames = int(tf) - int(t0) + 1
+        n_frames = int(stop_frame) - int(start_frame) + 1
         if int(len_msd) > int(n_frames):
             len_msd = int(n_frames)
         self.len_msd = int(len_msd)
         self.write_output = write_output
         self.max_data = max_data
 
-    def _select(self, frame):
+        # check that trajectory length is correct
+        try:
+            assert len(self.universe.trajectory) >= \
+                    (self.stop_frame-self.start_frame+1)
+        except RuntimeError:
+            print("Sample interval exceeds trajectory length. This may result"
+                  "from choice of start_frame/stop_frame or insufficient RAM"
+                  "when loading the trajectory.")
+
+    def _select(self):
         """Generates list of atom groups that satisfy select_list
            strings
-
-        Parameters
-        ----------
-        frame : int
-            number of the current frame
 
         Returns
         -------
@@ -178,15 +174,10 @@ class MSD(object):
             list of atom groups
         """
         selections = []
-        for i in range(len(self.select_list)):
-            try:
-                selections.append(self.universe.select_atoms(self.select_list[i]))
-                assert selections[i].n_atoms > 0
-            except:
-                try:
-                    selections.pop(i)
-                except:
-                    pass
+        for i, sel in enumerate(self.select_list):
+            selections.append(self.universe.select_atoms(sel))
+            if selections[i].n_atoms == 0:
+                selections.pop(i)
                 selections.append(None)
         
         return selections
@@ -227,21 +218,21 @@ class MSD(object):
                for i in range(n_sel)]
 
         print("Populating deque...")
-        for ts in self.universe.trajectory[self.t0:self.t0
+        for ts in self.universe.trajectory[self.start_frame:self.start_frame
                                            + self.len_msd]:
             this_frame = ts.frame
-            selections = self._select(this_frame)
+            selections = self._select()
 
-            for i in range(n_sel):
-                if selections[i] is not None:  # if there is data
-                    pos[i][this_frame-self.t0] = selections[i].positions
+            for i, sel in enumerate(selections):
+                if sel is not None:  # if there is data
+                    pos[i][this_frame-self.start_frame] = sel.positions.copy()
                     
-                    temp_list = selections[i].atoms.ids
+                    temp_list = sel.atoms.ids
                     # store set of atom ids which satisfy selection
-                    set_list[i][this_frame-self.t0] = set(temp_list)
+                    set_list[i][this_frame-self.start_frame] = set(temp_list)
                     # link atom id to array index
                     for j in range(len(temp_list)):
-                        dict_list[i][this_frame-self.t0][temp_list[j]] = j
+                        dict_list[i][this_frame-self.start_frame][temp_list[j]] = j
                     
             if this_frame % (self.len_msd/10) == 0:
                 print("Frame: "+str(this_frame))
@@ -275,7 +266,7 @@ class MSD(object):
         """
         # stop updating when there are no more frames to analyze
         top_frame = this_restart + self.len_msd
-        calc_cutoff = self.tf
+        calc_cutoff = self.stop_frame
         if self.max_data:
             calc_cutoff = len(self.universe.trajectory) - 1
 
@@ -289,7 +280,7 @@ class MSD(object):
         
         for ts in self.universe.trajectory[top_frame:top_frame
                                            + self.dt_restart]:
-            selections = self._select(ts.frame)
+            selections = self._select()
 
             for i in range(len(selections)):
                 if selections[i] is not None:  # if there is data
@@ -340,12 +331,12 @@ class MSD(object):
         n_samples = np.zeros((n_sel, self.len_msd), dtype='int')
         msd = np.zeros((n_sel, self.len_msd), dtype='float32')
         
-        calc_cutoff = self.tf
+        calc_cutoff = self.stop_Frame
         if self.max_data:
             calc_cutoff = len(self.universe.trajectory) - 1
 
         # for each restart point
-        for j in range(self.t0, self.tf+1, self.dt_restart):
+        for j in range(self.start_frame, self.stop_frame+1, self.dt_restart):
             for i in range(n_sel):  # for each selection
                 atoms_in_sel = set_list[i][0]  # storing initial set at restart
                 for ts in range(j, calc_cutoff+1):  # for each frame after restart
@@ -384,12 +375,6 @@ class MSD(object):
     def run(self):
         """Analyze trajectory and output pickle object"""
 
-        # check that trajectory length is correct
-        assert len(self.universe.trajectory) >= (self.tf-self.t0+1), \
-            ("Sample interval exceeds trajectory length. This may result"
-             "from choice of t0/tf or insufficient RAM when loading the"
-             "trajectory.")
-
         pos, set_list, dict_list, = self._init_pos_deque()
 
         msd, n_samples = self._process_pos_data(pos, set_list, dict_list)
@@ -424,17 +409,16 @@ if __name__ == "__main__":
     -f name of trajectory file
     -s name of tpr file
     --sel string containing selections separated by commas
-    -b t0 (frames)
-    -e tf (frames)
+    -b start_frame (frames)
+    -e stop_frame (frames)
     --dt number of frames between restarts
     -o output file name (optional)
     --len maximum number of tau frames to calculate (optional)
     --out write output boolean (optional, default=True)
-    --max_data include data from after tf if it exists
+    --max_data include data from after stop_frame if it exists
       this allows for command-line level parallelization without
       data loss. (optional, default=False)
     """
-    os.system('')
     # handling input arguments
     this_opts, args = getopt.getopt(sys.argv[1:], "f:s:b:e:o:",
                                     ['dt=', 'sel=', 'len=',
