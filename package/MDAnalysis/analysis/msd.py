@@ -20,11 +20,10 @@
 # J. Comput. Chem. 32 (2011), 2319--2327, doi:10.1002/jcc.21787
 #
 """
-Analysis building blocks --- :mod:`MDAnalysis.analysis.base`
-============================================================
+MSD --- :mod:`MDAnalysis.analysis.msd`
+===============================================================================
 
-A collection of useful building blocks for creating Analysis
-classes.
+A tool for computing mean squared displacement and diffusion coefficients
 
 """
 from six.moves import range, zip
@@ -57,8 +56,8 @@ class MSD(AnalysisBase):
     #==========================================================================
     # Constructor
     #==========================================================================
-    def __init__(self, universe, select_list, start=None,
-                 stop=None, step=None, begin_fit=0, end_fit=None,
+    def __init__(self, universe, select_list, start,
+                 stop, step=1, begin_fit=None, end_fit=None,
                  timestep_size=None, n_bootstraps=1000, dim=3, quiet=True,
                  database_name="msd.db", process_trajectory=True):
         """
@@ -68,14 +67,30 @@ class MSD(AnalysisBase):
             MDAnalysis Universe object
         select_list : list
             list of selection strings
-        start : int, optional
+        start : int
             start frame of analysis
-        stop : int, optional
+        stop : int
             stop frame of analysis
-        step : int, optional
+        step : int, optional (default=1)
             number of frames to skip between each analysed frame
+        begin_fit : list
+            list of fit interval beginnings, corresponding to select_list order
+        end_fit : list
+            list of fit interval endings, corresponding to select_list order
+        timestep_size : float
+            number of ps per frame (used for MSD estimation)
+        n_bootstraps : int
+            number of bootstraps used for estimating standard deviation of
+            the diffusion coefficient
+        dim : int
+            number of dimensions of diffusion
         quiet : bool, optional
             Turn off verbosity
+        database_name : str, optional
+            name of permanent database file
+        process_trajectory : bool, optional
+            determines whether to process trajectory or read from an already
+            generated database specified by database_name
         """
         self._quiet = quiet
         self.universe = universe
@@ -95,6 +110,7 @@ class MSD(AnalysisBase):
         # selection x time
         self.n_steps = self.stop-self.start/self.step
         self.MSD = np.zeros([len(self.select_list),self.n_steps],dtype=float)
+        self.total_samples = np.zeros([len(self.select_list),self.n_steps],dtype=float)
         self.MSDs = [np.array([]) for i in range(len(self.select_list))]
         self.n_samples = [np.array([]) for i in range(len(self.select_list))]
 
@@ -126,10 +142,10 @@ class MSD(AnalysisBase):
                 selections[-1] = None
         return selections
 
+
     #==========================================================================
     # Log data in database
     #==========================================================================
-
     def _single_frame(self):
         """Calculate data from a single frame of trajectory"""
         selections = self._select()
@@ -170,6 +186,9 @@ class MSD(AnalysisBase):
                         stop=self._frame_index, classification=i)
                     self._c.execute(datastr)
                     self._current_events[i].pop(event)
+                # Create database index for faster queries
+                self._c.execute("CREATE INDEX atom_entry ON {tn} (atomnr, time)".format(
+                            tn=self.trajectory_table_name))
 
         # Update Trajectory Table (avoiding duplication)
         all_atoms = set.union(*[set(sel.atoms) for sel in selections])
@@ -181,12 +200,12 @@ class MSD(AnalysisBase):
                 y=atom.position[1], z=atom.position[2]))
         return
 
+
     #==========================================================================
     # Setup Database
     #==========================================================================
     def _prepare(self):
         """Sets up database tables before the analysis loop begins."""
-        # set up database tables
         # classification is the index of the corresponding selection in
         # select_list
         self._c.execute("""CREATE TABLE {table_name} (atomnr INT, start INT,
@@ -197,9 +216,6 @@ class MSD(AnalysisBase):
                         table_name=self.trajectory_table_name))
         return
 
-    #==========================================================================
-    # Calculate MSD
-    #==========================================================================
 
     #==========================================================================
     # Using Fast Fourier transform code from:
@@ -214,6 +230,7 @@ class MSD(AnalysisBase):
         res= (res[:N]).real   #now we have the autocorrelation in convention B 
         n=N*np.ones(N)-np.arange(0,N) #divide res(m) by (N-m)                  
         return res/n #this is the autocorrelation in convention A              
+
                                                                   
     def msd_fft(self, r):                                                     
         N=len(r)                                                               
@@ -228,39 +245,82 @@ class MSD(AnalysisBase):
         return S1-2*S2
     #==========================================================================
 
+
     @staticmethod
     def lin_func(x,D,b):
         """Functional form of fit"""
         return D*x+b
 
-    def estimate_diffusion(self,msd):
-        """Returns estimate of diffusion coefficient for each selection"""
-        xdata = [self.timestep_size*self.step*i for i in range(self.begin_fit,
-                                                               self.end_fit)]
-        for i, sel_item in enumerate(self.select_list):
-            popt, pcov = curve_fit(self.lin_func,xdata,
-                                   msd[self.begin_fit:self.end_fit])
+
+    def estimate_diffusion(self,msd,b,e):
+        """Returns estimate of diffusion coefficient for each selection
+        
+        Parameters
+        ----------
+        msd : list
+            estimate of msd at corresponding list indexes
+        b : int
+            first frame in the fit interval (inclusive)
+        e : int
+            ending frame of the fit interval (exclusive)
+
+        Returns
+        -------
+        D : float
+            estimate of diffusion coefficient (A^2/ps)
+        """
+        xdata = [self.timestep_size*self.step*i for i in range(b,e)]
+        popt, pcov = curve_fit(self.lin_func,xdata,
+                               msd[b:e])
         return popt[0]*self._conversion
 
-    def estimate_err_diffusion(self,msd,num_samples):
-        """Bootstraps MSDs to estimate uncertainty in diffusion coefficient"""
-        est_D = []
-        n_events = len(msd)
+
+    def estimate_err_diffusion(self,msds,num_samples,b,e):
+        """Bootstraps MSDs to estimate uncertainty in diffusion coefficient
+
+        Parameters
+        ----------
+        msds : 2d numpy array, np.float32
+            array of msd estimates for individual events
+        num_samples : 2d numpy array, np.int32
+            number of samples associated with corresponding samples in msds
+        b : int
+            first frame in the fit interval (inclusive)
+        e : int
+            ending frame of the fit interval (exclusive)
+        
+        Returns
+        -------
+        std_D : float
+            Returns bootstrapped standard deviation in diffusion coefficient
+            estimate
+        """
+        est_D = [] # list of diffusion coefficient estimates
+        n_events = len(msds) # total number of events per bootstrap sample
+        # array containing bootstrapped estimates of msd
         eMSDs = np.zeros([n_events,self.n_steps],dtype=np.float32)
+        # array containing corresponding number of samples for each estimate
         en_samples = np.zeros([n_events,self.n_steps],dtype=np.int32)
     
         # generating bootstrapped MSDs, then storing diffusion estimates
         for b in range(self.n_bootstraps):
+            # pick randomly from msd with replacement
             indices = np.random.randint(0,n_events,n_events)
             for n in range(n_events):
-                eMSDs[n] = msd[indices[n]]
+                eMSDs[n] = msds[indices[n]]
                 en_samples[n] = num_samples[indices[n]]
+            # calculate msd from bootstrapped msds
             eMSD = np.divide((en_samples*eMSDs).sum(axis=0),
                                      en_samples.sum(axis=0))
-            est_D.append(self.estimate_diffusion(eMSD))
+            # add estimate to list of estimates
+            est_D.append(self.estimate_diffusion(eMSD,b,e))
+
         return np.std(np.array(est_D),axis=0,ddof=1)
 
 
+    #==========================================================================
+    # Calculate MSD and diffusion coefficient
+    #==========================================================================
     def _conclude(self):
         """Calculate MSD"""
         # For each selection
@@ -275,40 +335,36 @@ class MSD(AnalysisBase):
                             dtype=float)
             # event x time
             self.n_samples[i] = np.zeros([n_events,self.n_steps])
+
             for j, event in enumerate(data):
                 # pull data from database into a time X [x,y,z] numpy array
                 x = pd.read_sql_query("""SELECT x, y, z FROM {tn} WHERE 
                                    atomnr={an} AND time >= {start} AND
-                                   time <= {stop} ORDER BY time""".format(
+                                   time <= {stop}""".format(
                                    tn=self.trajectory_table_name, an=event[0],
                                    start=event[1], stop=event[2]),
                                    self._conn).as_matrix()
-                #print(x)
+
                 msd_data = self.msd_fft(x)
-                #print("MSD DATA:")
-                #print msd_data
-                #print('\n')
                 self.MSDs[i][j] = np.pad(msd_data, (0, self.n_steps
                                          - len(msd_data)), 'constant')
+
                 samples = np.arange(len(msd_data),0,-1,dtype=int)
                 self.n_samples[i][j] = np.pad(samples, (0, self.n_steps
                                       - len(samples)), 'constant')
-            # calculating MSD using weighted average
-            #print self.n_samples[i]
-            #print self.n_samples[i]*self.MSDs[i]
-            #print self.n_samples[i].sum(axis=0)
-            # Don't print divide by zeros errors (you will throw this data
-            # out later
+
             self.MSD[i] = np.divide((self.n_samples[i]*self.MSDs[i]).sum(axis=0),
                                      self.n_samples[i].sum(axis=0))
-            
-            self.D[i] = self.estimate_diffusion(self.MSD[i])
-            self.err_D[i] = self.estimate_err_diffusion(self.MSDs[i],
-                                                        self.n_samples[i])
-            # Debugging:
-            #my_axis = [2*k for k in range(len(self.MSD[i]))]
-            #plt.plot(my_axis,self.MSD[i])
-            #plt.show()
+            self.total_samples[i] = self.n_samples[i].sum(axis=0)
+
+            # if data for diffusion calculation is specified, calculated diffusion
+            # coefficient and uncertainty
+            if(self.begin_fit & self.end_fit & self.timestep_size):
+                self.D[i] = self.estimate_diffusion(self.MSD[i],self.begin_fit[i],
+                                                    self.end_fit[i])
+                self.err_D[i] = \
+                    self.estimate_err_diffusion(self.MSDs[i], self.n_samples[i],
+                                                self.begin_fit[i], self.end_fit[i])
         return
 
     def run(self):
@@ -320,8 +376,11 @@ class MSD(AnalysisBase):
                     self._trajectory[self.start:self.stop:self.step]):
                 self._frame_index = i
                 self._ts = ts
-                # logger.info("--> Doing frame {} of {}".format(i+1, self.n_frames))
+                logger.info("--> Doing frame {} of {}".format(i+1, self.n_frames))
                 self._single_frame()
+                # commit database writes every 100 frames
+                if i % 100 == 0:
+                    self._conn.commit()
                 self._pm.echo(self._frame_index)
             logger.info("Finishing up")
         self._conn.commit()
