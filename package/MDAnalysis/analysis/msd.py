@@ -186,9 +186,6 @@ class MSD(AnalysisBase):
                         stop=self._frame_index, classification=i)
                     self._c.execute(datastr)
                     self._current_events[i].pop(event)
-                # Create database index for faster queries
-                self._c.execute("CREATE INDEX atom_entry ON {tn} (atomnr, time)".format(
-                            tn=self.trajectory_table_name))
 
         # Update Trajectory Table (avoiding duplication)
         all_atoms = set.union(*[set(sel.atoms) for sel in selections])
@@ -371,7 +368,8 @@ class MSD(AnalysisBase):
         """Perform the calculation"""
         logger.info("Starting preparation")
         if self._process_trajectory:
-            self._prepare() # note: prepare initializes previous frame dat
+            self._prepare() # note: prepare initializes previous frame data
+            logger.info("Reading trajectory data")
             for i, ts in enumerate(
                     self._trajectory[self.start:self.stop:self.step]):
                 self._frame_index = i
@@ -382,8 +380,12 @@ class MSD(AnalysisBase):
                 if i % 100 == 0:
                     self._conn.commit()
                 self._pm.echo(self._frame_index)
-            logger.info("Finishing up")
+            logger.info("Indexing Database")
+            # Create database index for faster queries
+            self._c.execute("CREATE INDEX atom_entry ON {tn} (atomnr, time)".format(
+                            tn=self.trajectory_table_name))
         self._conn.commit()
+        logger.info("Calculating MSD... (this may take several minutes)")
         self._conclude()
         return self
 
