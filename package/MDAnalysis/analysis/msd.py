@@ -58,7 +58,7 @@ class MSD(AnalysisBase):
     #==========================================================================
     def __init__(self, universe, select_list, start,
                  stop, step=1, begin_fit=None, end_fit=None,
-                 timestep_size=None, n_bootstraps=1000, dim=3, quiet=True,
+                 timestep_size=1, n_bootstraps=1000, dim=3, quiet=True,
                  database_name="msd.db", process_trajectory=True):
         """
         Parameters
@@ -112,6 +112,7 @@ class MSD(AnalysisBase):
         self.MSD = np.zeros([len(self.select_list),self.n_steps],dtype=float)
         self.total_samples = np.zeros([len(self.select_list),self.n_steps],dtype=float)
         self.MSDs = [np.array([]) for i in range(len(self.select_list))]
+        self.MSDs_annotate = [[] for i in range(len(self.select_list))]
         self.n_samples = [np.array([]) for i in range(len(self.select_list))]
 
         self.D = [0.0 for i in range(len(self.select_list))]
@@ -300,7 +301,7 @@ class MSD(AnalysisBase):
         en_samples = np.zeros([n_events,self.n_steps],dtype=np.int32)
     
         # generating bootstrapped MSDs, then storing diffusion estimates
-        for b in range(self.n_bootstraps):
+        for interation in range(self.n_bootstraps):
             # pick randomly from msd with replacement
             indices = np.random.randint(0,n_events,n_events)
             for n in range(n_events):
@@ -334,6 +335,7 @@ class MSD(AnalysisBase):
             self.n_samples[i] = np.zeros([n_events,self.n_steps])
 
             for j, event in enumerate(data):
+                self.MSDs_annotate[i].append(event)
                 # pull data from database into a time X [x,y,z] numpy array
                 x = pd.read_sql_query("""SELECT x, y, z FROM {tn} WHERE 
                                    atomnr={an} AND time >= {start} AND
@@ -356,7 +358,7 @@ class MSD(AnalysisBase):
 
             # if data for diffusion calculation is specified, calculated diffusion
             # coefficient and uncertainty
-            if(self.begin_fit & self.end_fit & self.timestep_size):
+            if((self.begin_fit is not None) & (self.end_fit is not None)):
                 self.D[i] = self.estimate_diffusion(self.MSD[i],self.begin_fit[i],
                                                     self.end_fit[i])
                 self.err_D[i] = \
