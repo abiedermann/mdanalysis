@@ -336,7 +336,7 @@ class MSD(AnalysisBase):
             self.n_samples[i] = np.zeros([n_events,self.n_steps])
 
             for j, event in enumerate(data):
-                self.MSDs_annotate[i] = event
+                self.MSDs_annotate[i][j] = event
                 # pull data from database into a time X [x,y,z] numpy array
                 x = pd.read_sql_query("""SELECT x, y, z FROM {tn} WHERE 
                                    atomnr={an} AND time >= {start} AND
