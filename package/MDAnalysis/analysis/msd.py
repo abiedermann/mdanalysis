@@ -328,7 +328,7 @@ class MSD(AnalysisBase):
                                        classification={cl}""".format(
                                     tn=self.event_log_table_name,cl=i)).fetchall()
             n_events = len(data)
-            self.MSDs_annotate[i] = [tuple() for i in range(n_events)]
+            self.MSDs_annotate[i] = [tuple() for k in range(n_events)]
             # event x time
             self.MSDs[i] = np.zeros([n_events,self.n_steps],
                             dtype=float)
@@ -336,7 +336,7 @@ class MSD(AnalysisBase):
             self.n_samples[i] = np.zeros([n_events,self.n_steps])
 
             for j, event in enumerate(data):
-                self.MSDs_annotate[i][j] = event
+                self.MSDs_annotate[i][j] = list(event)
                 # pull data from database into a time X [x,y,z] numpy array
                 x = pd.read_sql_query("""SELECT x, y, z FROM {tn} WHERE 
                                    atomnr={an} AND time >= {start} AND
