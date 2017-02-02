@@ -35,6 +35,7 @@ import six
 import sqlite3
 import pandas as pd
 from scipy.optimize import curve_fit
+from scipy.sparse import lil_matrix
 
 from MDAnalysis.core.universe import Universe
 from .base import AnalysisBase
@@ -111,9 +112,9 @@ class MSD(AnalysisBase):
         self.n_steps = self.stop-self.start/self.step
         self.MSD = np.zeros([len(self.select_list),self.n_steps],dtype=float)
         self.total_samples = np.zeros([len(self.select_list),self.n_steps],dtype=float)
-        self.MSDs = [np.array([]) for i in range(len(self.select_list))]
+        self.MSDs = [lil_matrix([],dtype=float) for i in range(len(self.select_list))]
         self.MSDs_annotate = [[] for i in range(len(self.select_list))]
-        self.n_samples = [np.array([]) for i in range(len(self.select_list))]
+        self.n_samples = [lil_matrix([],dtype=int) for i in range(len(self.select_list))]
 
         self.D = [0.0 for i in range(len(self.select_list))]
         self.err_D = [0.0 for i in range(len(self.select_list))]
@@ -166,26 +167,31 @@ class MSD(AnalysisBase):
                 # sel
                 event_terminations = atoms_in_current_events - atoms_in_sel
                 for event in event_terminations:
-                    datastr = """INSERT INTO {tn} (atomnr, start, stop,
-                        classification) VALUES ({an}, {start}, {stop}, 
-                        {classification})""".format(
-                        tn=self.event_log_table_name, an=event,
-                        start=self._current_events[i][event],
-                        stop=self._frame_index-self.step, classification=i)
-                    self._c.execute(datastr)
+                    # avoiding logging trivial diffusion events
+                    if(self._current_events[i][event] !=
+                        self._frame_index-self.step):
+                        datastr = """INSERT INTO {tn} (atomnr, start, stop,
+                            classification) VALUES ({an}, {start}, {stop}, 
+                            {classification})""".format(
+                            tn=self.event_log_table_name, an=event,
+                            start=self._current_events[i][event],
+                            stop=self._frame_index-self.step, classification=i)
+                        self._c.execute(datastr)
                     self._current_events[i].pop(event)
         
             # Log all ongoing events at the end of the trajectory
             if(self._frame_index == self.stop-self.step):
                 event_terminations = set(self._current_events[i].keys())
                 for event in event_terminations:
-                    datastr = """INSERT INTO {tn} (atomnr, start, stop,
-                        classification) VALUES ({an}, {start}, {stop}, 
-                        {classification})""".format(
-                        tn=self.event_log_table_name, an=event,
-                        start=self._current_events[i][event],
-                        stop=self._frame_index, classification=i)
-                    self._c.execute(datastr)
+                    # avoid logging trivial diffusion events
+                    if(self._frame_index != self._current_events[i][event]):
+                        datastr = """INSERT INTO {tn} (atomnr, start, stop,
+                            classification) VALUES ({an}, {start}, {stop}, 
+                            {classification})""".format(
+                            tn=self.event_log_table_name, an=event,
+                            start=self._current_events[i][event],
+                            stop=self._frame_index, classification=i)
+                        self._c.execute(datastr)
                     self._current_events[i].pop(event)
 
         # Update Trajectory Table (avoiding duplication)
@@ -273,7 +279,7 @@ class MSD(AnalysisBase):
         return popt[0]*self._conversion
 
 
-    def estimate_err_diffusion(self,msds,num_samples,b,e):
+    def estimate_err_diffusion(self,msds,num_samples,b,e,n_events):
         """Bootstraps MSDs to estimate uncertainty in diffusion coefficient
 
         Parameters
@@ -294,12 +300,11 @@ class MSD(AnalysisBase):
             estimate
         """
         est_D = [] # list of diffusion coefficient estimates
-        n_events = len(msds) # total number of events per bootstrap sample
         # array containing bootstrapped estimates of msd
-        eMSDs = np.zeros([n_events,self.n_steps],dtype=np.float32)
+        eMSDs = lil_matrix((n_events,self.n_steps),dtype=np.float32)
         # array containing corresponding number of samples for each estimate
-        en_samples = np.zeros([n_events,self.n_steps],dtype=np.int32)
-    
+        en_samples = lil_matrix((n_events,self.n_steps),dtype=np.int32)
+ 
         # generating bootstrapped MSDs, then storing diffusion estimates
         for interation in range(self.n_bootstraps):
             # pick randomly from msd with replacement
@@ -308,8 +313,8 @@ class MSD(AnalysisBase):
                 eMSDs[n] = msds[indices[n]]
                 en_samples[n] = num_samples[indices[n]]
             # calculate msd from bootstrapped msds
-            eMSD = np.divide((en_samples*eMSDs).sum(axis=0),
-                                     en_samples.sum(axis=0))
+            eMSD = np.array(np.nan_to_num(np.divide((en_samples.multiply(eMSDs)).sum(axis=0),
+                                     en_samples.sum(axis=0)))).reshape(self.n_steps)
             # add estimate to list of estimates
             est_D.append(self.estimate_diffusion(eMSD,b,e))
 
@@ -328,15 +333,15 @@ class MSD(AnalysisBase):
                                        classification={cl}""".format(
                                     tn=self.event_log_table_name,cl=i)).fetchall()
             n_events = len(data)
+            print(i)
+            print(n_events)
             self.MSDs_annotate[i] = [tuple() for k in range(n_events)]
             # event x time
-            self.MSDs[i] = np.zeros([n_events,self.n_steps],
-                            dtype=float)
+            self.MSDs[i] = lil_matrix((n_events, self.n_steps), dtype=float)
             # event x time
-            self.n_samples[i] = np.zeros([n_events,self.n_steps])
-
+            self.n_samples[i] = lil_matrix((n_events,self.n_steps), dtype=int)
             for j, event in enumerate(data):
-                self.MSDs_annotate[i][j] = list(event)
+                self.MSDs_annotate[i][j] = event
                 # pull data from database into a time X [x,y,z] numpy array
                 x = pd.read_sql_query("""SELECT x, y, z FROM {tn} WHERE 
                                    atomnr={an} AND time >= {start} AND
@@ -353,8 +358,9 @@ class MSD(AnalysisBase):
                 self.n_samples[i][j] = np.pad(samples, (0, self.n_steps
                                       - len(samples)), 'constant')
 
-            self.MSD[i] = np.divide((self.n_samples[i]*self.MSDs[i]).sum(axis=0),
-                                     self.n_samples[i].sum(axis=0))
+            self.MSD[i] = np.nan_to_num(np.divide(
+                            (self.n_samples[i].multiply(self.MSDs[i])).sum(axis=0),
+                                     self.n_samples[i].sum(axis=0)))
             self.total_samples[i] = self.n_samples[i].sum(axis=0)
 
             # if data for diffusion calculation is specified, calculated diffusion
@@ -364,7 +370,7 @@ class MSD(AnalysisBase):
                                                     self.end_fit[i])
                 self.err_D[i] = \
                     self.estimate_err_diffusion(self.MSDs[i], self.n_samples[i],
-                                                self.begin_fit[i], self.end_fit[i])
+                                                self.begin_fit[i], self.end_fit[i], n_events)
         return
 
     def run(self):
@@ -387,6 +393,8 @@ class MSD(AnalysisBase):
             # Create database index for faster queries
             self._c.execute("CREATE INDEX atom_entry ON {tn} (atomnr, time)".format(
                             tn=self.trajectory_table_name))
+            del(self._trajectory)
+            del(self.universe)
         self._conn.commit()
         logger.info("Calculating MSD... (this may take several minutes)")
         self._conclude()
