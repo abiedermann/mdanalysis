@@ -35,7 +35,7 @@ import six
 import sqlite3
 import pandas as pd
 from scipy.optimize import curve_fit
-from scipy.sparse import lil_matrix
+from scipy.sparse import lil_matrix, vstack
 
 from MDAnalysis.core.universe import Universe
 from .base import AnalysisBase
@@ -300,18 +300,14 @@ class MSD(AnalysisBase):
             estimate
         """
         est_D = [] # list of diffusion coefficient estimates
-        # array containing bootstrapped estimates of msd
-        eMSDs = lil_matrix((n_events,self.n_steps),dtype=np.float32)
-        # array containing corresponding number of samples for each estimate
-        en_samples = lil_matrix((n_events,self.n_steps),dtype=np.int32)
- 
         # generating bootstrapped MSDs, then storing diffusion estimates
         for interation in range(self.n_bootstraps):
             # pick randomly from msd with replacement
             indices = np.random.randint(0,n_events,n_events)
-            for n in range(n_events):
-                eMSDs[n] = msds[indices[n]]
-                en_samples[n] = num_samples[indices[n]]
+            eMSDs = vstack([msds.getrow(indices[n]) for n
+                            in range(n_events)])
+            en_samples = vstack([num_samples.getrow(indices[n]) for n
+                            in range(n_events)])
             # calculate msd from bootstrapped msds
             eMSD = np.array(np.nan_to_num(np.divide((en_samples.multiply(eMSDs)).sum(axis=0),
                                      en_samples.sum(axis=0)))).reshape(self.n_steps)
@@ -357,6 +353,9 @@ class MSD(AnalysisBase):
                 samples = np.arange(len(msd_data),0,-1,dtype=int)
                 self.n_samples[i][j] = np.pad(samples, (0, self.n_steps
                                       - len(samples)), 'constant')
+
+            self.MSDs[i] = self.MSDs[i].tocsr()
+            self.n_samples[i] = self.n_samples[i].tocsr()
 
             self.MSD[i] = np.nan_to_num(np.divide(
                             (self.n_samples[i].multiply(self.MSDs[i])).sum(axis=0),
