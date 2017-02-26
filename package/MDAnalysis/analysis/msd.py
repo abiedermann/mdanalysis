@@ -60,7 +60,8 @@ class MSD(AnalysisBase):
     def __init__(self, universe, select_list, start,
                  stop, step=1, begin_fit=None, end_fit=None,
                  timestep_size=1, n_bootstraps=1000, dim=3, quiet=True,
-                 database_name="msd.db", process_trajectory=True):
+                 database_name="msd.db", process_trajectory=True,
+                 min_event_length=0, sim_sample_limit=None):
         """
         Parameters
         ----------
@@ -92,6 +93,13 @@ class MSD(AnalysisBase):
         process_trajectory : bool, optional
             determines whether to process trajectory or read from an already
             generated database specified by database_name
+        min_event_length : int, optional
+            minimum number of sampled frames necessary for an event to be included
+            in diffusion calculation (helps to significantly reduce computational
+            expense caused by molecules quickly diffusing across a boundary)
+        sim_sample_limit : int, optional
+            specifies the maximum number of diffusion events to follow at any time,
+            allowing one to effectively subsample from a large number of molecules
         """
         self._quiet = quiet
         self.universe = universe
@@ -102,7 +110,10 @@ class MSD(AnalysisBase):
         self.begin_fit = begin_fit
         self.end_fit = end_fit
         self.n_bootstraps = n_bootstraps
+        self._min_event_length = min_event_length
+        self._sim_sample_limit = sim_sample_limit
 
+        # conversion from A^2/ps to cm^2/s
         self._conversion = float(10**-4)/(2*dim)
 
         # initializing dictionaries for event log creation
@@ -161,15 +172,18 @@ class MSD(AnalysisBase):
                 # to current events
                 new_events = atoms_in_sel - atoms_in_current_events
                 for new_atom in new_events:
-                    self._current_events[i][new_atom] = self._frame_index
+                    if self._sim_sample_limit is None:
+                        self._current_events[i][new_atom] = self._frame_index
+                    elif len(atoms_in_current_events) <= self._sim_sample_limit:
+                        self._current_events[i][new_atom] = self._frame_index
 
                 # Log and remove atoms which are in current events but not in
                 # sel
                 event_terminations = atoms_in_current_events - atoms_in_sel
                 for event in event_terminations:
                     # avoiding logging trivial diffusion events
-                    if(self._current_events[i][event] !=
-                        self._frame_index-self.step):
+                    if (float(self._frame_index-self._current_events[i][event])/self.step >
+                        self._min_event_length):
                         datastr = """INSERT INTO {tn} (atomnr, start, stop,
                             classification) VALUES ({an}, {start}, {stop}, 
                             {classification})""".format(
@@ -184,7 +198,9 @@ class MSD(AnalysisBase):
                 event_terminations = set(self._current_events[i].keys())
                 for event in event_terminations:
                     # avoid logging trivial diffusion events
-                    if(self._frame_index != self._current_events[i][event]):
+                    if (float(self._frame_index-self._current_events[i][event])/self.step >
+                        self._min_event_length):
+                        #if(self._frame_index != self._current_events[i][event]):
                         datastr = """INSERT INTO {tn} (atomnr, start, stop,
                             classification) VALUES ({an}, {start}, {stop}, 
                             {classification})""".format(
@@ -271,7 +287,7 @@ class MSD(AnalysisBase):
         Returns
         -------
         D : float
-            estimate of diffusion coefficient (A^2/ps)
+            estimate of diffusion coefficient (cm^2/s)
         """
         xdata = [self.timestep_size*self.step*i for i in range(b,e)]
         popt, pcov = curve_fit(self.lin_func,xdata,
