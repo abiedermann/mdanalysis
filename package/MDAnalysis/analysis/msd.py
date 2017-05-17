@@ -44,6 +44,8 @@ from MDAnalysis.core.groups import AtomGroup
 from MDAnalysis.lib.log import ProgressMeter
 
 logger = logging.getLogger("MDAnalysis.analysis.MSD")
+# declaring static conversion from A^2/ps to cm^2/s
+_conversion = float(10**-4)/(2) # note: divide by dim
 
 
 class MSD(AnalysisBase):
@@ -54,6 +56,7 @@ class MSD(AnalysisBase):
         - Return csv file with msd vs time data
     """
 
+
     #==========================================================================
     # Constructor
     #==========================================================================
@@ -61,7 +64,7 @@ class MSD(AnalysisBase):
                  stop, step=1, begin_fit=None, end_fit=None,
                  timestep_size=1, n_bootstraps=1000, dim=3, quiet=True,
                  database_name="msd.db", process_trajectory=True,
-                 min_event_length=0, sim_sample_limit=None):
+                 min_event_length=0, sim_sample_limit=None, adjust=None):
         """
         Parameters
         ----------
@@ -103,7 +106,12 @@ class MSD(AnalysisBase):
         """
         self._quiet = quiet
         self.universe = universe
-        self._setup_frames(universe.trajectory, start, stop, step)
+        if process_trajectory:
+            self._setup_frames(universe.trajectory, start, stop, step)
+        else:
+            self.start = start
+            self.stop = stop
+            self.step = step
         self.select_list =  select_list
         self._process_trajectory = process_trajectory
         self.timestep_size = timestep_size
@@ -112,15 +120,13 @@ class MSD(AnalysisBase):
         self.n_bootstraps = n_bootstraps
         self._min_event_length = min_event_length
         self._sim_sample_limit = sim_sample_limit
-
-        # conversion from A^2/ps to cm^2/s
-        self._conversion = float(10**-4)/(2*dim)
-
+        self.dim = dim
+        self.adjust = adjust
         # initializing dictionaries for event log creation
         self._current_events = [dict() for i in range(len(select_list))]
         
         # selection x time
-        self.n_steps = self.stop-self.start/self.step
+        self.n_steps = (self.stop-self.start)/self.step + 1
         self.MSD = np.zeros([len(self.select_list),self.n_steps],dtype=float)
         self.total_samples = np.zeros([len(self.select_list),self.n_steps],dtype=float)
         self.MSDs = [lil_matrix([],dtype=float) for i in range(len(self.select_list))]
@@ -251,12 +257,12 @@ class MSD(AnalysisBase):
         n=N*np.ones(N)-np.arange(0,N) #divide res(m) by (N-m)                  
         return res/n #this is the autocorrelation in convention A              
 
-                                                                  
-    def msd_fft(self, r):                                                     
+    @staticmethod                                               
+    def msd_fft(r):                                                     
         N=len(r)                                                               
         D=np.square(r).sum(axis=1)                                             
         D=np.append(D,0)                                                       
-        S2=sum([self.autocorrFFT(r[:, i]) for i in range(r.shape[1])])        
+        S2=sum([MSD.autocorrFFT(r[:, i]) for i in range(r.shape[1])])        
         Q=2*D.sum()                                                             
         S1=np.zeros(N)                                                         
         for m in range(N):                                                 
@@ -271,8 +277,8 @@ class MSD(AnalysisBase):
         """Functional form of fit"""
         return D*x+b
 
-
-    def estimate_diffusion(self,msd,b,e):
+    @staticmethod
+    def estimate_diffusion(msd,b,e,timestep_size,step,dim):
         """Returns estimate of diffusion coefficient for each selection
         
         Parameters
@@ -289,10 +295,10 @@ class MSD(AnalysisBase):
         D : float
             estimate of diffusion coefficient (cm^2/s)
         """
-        xdata = [self.timestep_size*self.step*i for i in range(b,e)]
-        popt, pcov = curve_fit(self.lin_func,xdata,
+        xdata = [timestep_size*step*i for i in range(b,e)]
+        popt, pcov = curve_fit(MSD.lin_func,xdata,
                                msd[b:e])
-        return popt[0]*self._conversion
+        return popt[0]*_conversion/dim
 
 
     def estimate_err_diffusion(self,msds,num_samples,b,e,n_events):
@@ -328,7 +334,7 @@ class MSD(AnalysisBase):
             eMSD = np.array(np.nan_to_num(np.divide((en_samples.multiply(eMSDs)).sum(axis=0),
                                      en_samples.sum(axis=0)))).reshape(self.n_steps)
             # add estimate to list of estimates
-            est_D.append(self.estimate_diffusion(eMSD,b,e))
+            est_D.append(self.estimate_diffusion(eMSD,b,e,self.timestep_size,self.step,self.dim))
 
         return np.std(np.array(est_D),axis=0,ddof=1)
 
@@ -361,7 +367,9 @@ class MSD(AnalysisBase):
                                    tn=self.trajectory_table_name, an=event[0],
                                    start=event[1], stop=event[2]),
                                    self._conn).as_matrix()
-
+                if self.adjust is not None:
+                    if self.adjust[i] is not None:
+                        x = x - self.adjust[i][:len(x)]
                 msd_data = self.msd_fft(x)
                 self.MSDs[i][j] = np.pad(msd_data, (0, self.n_steps
                                          - len(msd_data)), 'constant')
@@ -382,7 +390,8 @@ class MSD(AnalysisBase):
             # coefficient and uncertainty
             if((self.begin_fit is not None) & (self.end_fit is not None)):
                 self.D[i] = self.estimate_diffusion(self.MSD[i],self.begin_fit[i],
-                                                    self.end_fit[i])
+                                                    self.end_fit[i],self.timestep_size,
+                                                    self.step,self.dim)
                 self.err_D[i] = \
                     self.estimate_err_diffusion(self.MSDs[i], self.n_samples[i],
                                                 self.begin_fit[i], self.end_fit[i], n_events)
